@@ -45,7 +45,26 @@ export async function POST(req: NextRequest) {
   const job = createJob(ticker, date, model, debateRounds)
   const jobId = job.id
 
-  const pythonPath = "/root/miniconda3/bin/python"
+  const pythonPath = process.env.PYTHON_PATH ||
+    (() => {
+      const candidates = [
+        "/root/miniconda3/bin/python",
+        "/home/" + process.env.USER + "/miniconda3/bin/python",
+        "/opt/miniconda3/bin/python",
+        "/usr/local/bin/python3",
+        "/usr/bin/python3",
+        "python3",
+        "python"
+      ]
+      const { execSync } = require("child_process")
+      for (const candidate of candidates) {
+        try {
+          execSync(candidate + " --version", { stdio: "ignore" })
+          return candidate
+        } catch {}
+      }
+      return "python3"
+    })()
   const projectRoot = path.resolve(path.join(process.cwd(), ".."))
 
   const script = `

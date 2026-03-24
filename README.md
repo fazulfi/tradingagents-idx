@@ -146,6 +146,22 @@ Get your keys:
 
 ## 🚀 Installation
 
+### Quick Install
+
+```bash
+bash install.sh
+```
+
+This will create the `tradingagents` conda environment, install all dependencies, copy `.env.example` to `.env`, install frontend packages, and generate a random `DASHBOARD_SECRET` in `frontend/.env.local`.
+
+After running, edit `.env` to add your API keys, then start the app:
+
+```bash
+bash start.sh
+```
+
+### Manual Installation
+
 ### 1. Clone the repository
 
 ```bash
@@ -255,6 +271,7 @@ The dashboard is now available at `http://localhost:3000`.
 | `ANTHROPIC_API_KEY` | CLI only | Anthropic API key |
 | `GOOGLE_API_KEY` | CLI only | Google Gemini API key |
 | `XAI_API_KEY` | CLI only | xAI Grok API key |
+| `PYTHON_PATH` | No | Path to Python interpreter (default: auto-detect) |
 
 ### Frontend environment variables (`frontend/.env.local`)
 
@@ -442,7 +459,7 @@ tradingagents-idx/
 - **Add a new exchange**: Edit the `EXCHANGE_CONTEXT` injection block in `frontend/app/api/jobs/start/route.ts`
 - **Change default model**: Update `model` initial state in `frontend/app/page.tsx`
 - **Add a new analyst**: Implement in `tradingagents/agents/analysts/`, add to `TradingAgentsGraph._create_tool_nodes()` and `GraphSetup.setup_graph()`
-- **Python path**: The dashboard hardcodes `/root/miniconda3/bin/python`. Update `pythonPath` in `start/route.ts` if your Python is elsewhere.
+- **Python path**: Set `PYTHON_PATH` in `.env` to override the auto-detected interpreter (e.g. `/home/user/miniconda3/bin/python`).
 
 ---
 
