@@ -3,9 +3,9 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "tradingagents"
-version = "0.2.2"
-description = "TradingAgents: Multi-Agents LLM Financial Trading Framework"
+name = "tradingagents-idx"
+version = "1.1.0"
+description = "TradingAgents IDX: Multi-Agent LLM Trading with Web Dashboard & Indonesian Exchange Support"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
