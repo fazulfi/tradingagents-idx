@@ -20,7 +20,7 @@ class Propagator:
     ) -> Dict[str, Any]:
         """Create the initial state for the agent graph."""
         return {
-            "messages": [("human", company_name)],
+            "messages": [("human", f"Analyze {company_name} for {trade_date}. Use your available tools immediately to fetch the required data. Do not ask for clarification.")],
             "company_of_interest": company_name,
             "trade_date": str(trade_date),
             "investment_debate_state": InvestDebateState(
@@ -51,6 +51,7 @@ class Propagator:
             "fundamentals_report": "",
             "sentiment_report": "",
             "news_report": "",
+            "context": "",
         }
 
     def get_graph_args(self, callbacks: Optional[List] = None) -> Dict[str, Any]:

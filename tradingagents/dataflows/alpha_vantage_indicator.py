@@ -57,6 +57,28 @@ def get_indicator(
         "vwma": "VWMA: A moving average weighted by volume. Usage: Confirm trends by integrating price action with volume data. Tips: Watch for skewed results from volume spikes; use in combination with other volume analyses."
     }
 
+    _indicator_aliases = {
+        "macd signal": "macds",
+        "macd_signal": "macds",
+        "signal line": "macds",
+        "macd histogram": "macdh",
+        "macd_histogram": "macdh",
+        "histogram": "macdh",
+        "bollinger": "boll",
+        "bollinger middle": "boll",
+        "bollinger upper": "boll_ub",
+        "bollinger upper band": "boll_ub",
+        "bollinger lower": "boll_lb",
+        "bollinger lower band": "boll_lb",
+        "sma50": "close_50_sma",
+        "sma200": "close_200_sma",
+        "ema10": "close_10_ema",
+        "50 sma": "close_50_sma",
+        "200 sma": "close_200_sma",
+        "10 ema": "close_10_ema",
+    }
+    indicator = _indicator_aliases.get(indicator.lower(), indicator)
+
     if indicator not in supported_indicators:
         raise ValueError(
             f"Indicator {indicator} is not supported. Please choose from: {list(supported_indicators.keys())}"

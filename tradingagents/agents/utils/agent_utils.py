@@ -1,3 +1,4 @@
+import os
 from langchain_core.messages import HumanMessage, RemoveMessage
 
 # Import tools from separate utility files
@@ -22,11 +23,20 @@ from tradingagents.agents.utils.news_data_tools import (
 
 def build_instrument_context(ticker: str) -> str:
     """Describe the exact instrument so agents preserve exchange-qualified tickers."""
-    return (
+    base = (
         f"The instrument to analyze is `{ticker}`. "
         "Use this exact ticker in every tool call, report, and recommendation, "
-        "preserving any exchange suffix (e.g. `.TO`, `.L`, `.HK`, `.T`)."
+        "preserving any exchange suffix (e.g. `.TO`, `.L`, `.HK`, `.T`). "
+        "IMPORTANT: You MUST call your data-fetching tools immediately. "
+        "Do NOT ask for clarification. Do NOT ask what the user wants. "
+        "The task is already defined — start fetching data right now."
     )
+    parts = [base]
+    for key in ("EXCHANGE_CONTEXT", "DATE_CONTEXT", "ANALYST_PERSONA", "LANGUAGE_INSTRUCTION"):
+        val = os.environ.get(key, "").strip()
+        if val:
+            parts.append(val)
+    return "\n\n".join(parts)
 
 def create_msg_delete():
     def delete_messages(state):

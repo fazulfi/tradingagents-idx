@@ -128,6 +128,28 @@ def get_stock_stats_indicators_window(
         ),
     }
 
+    _indicator_aliases = {
+        "macd signal": "macds",
+        "macd_signal": "macds",
+        "signal line": "macds",
+        "macd histogram": "macdh",
+        "macd_histogram": "macdh",
+        "histogram": "macdh",
+        "bollinger": "boll",
+        "bollinger middle": "boll",
+        "bollinger upper": "boll_ub",
+        "bollinger upper band": "boll_ub",
+        "bollinger lower": "boll_lb",
+        "bollinger lower band": "boll_lb",
+        "sma50": "close_50_sma",
+        "sma200": "close_200_sma",
+        "ema10": "close_10_ema",
+        "50 sma": "close_50_sma",
+        "200 sma": "close_200_sma",
+        "10 ema": "close_10_ema",
+    }
+    indicator = _indicator_aliases.get(indicator.lower(), indicator)
+
     if indicator not in best_ind_params:
         raise ValueError(
             f"Indicator {indicator} is not supported. Please choose from: {list(best_ind_params.keys())}"
