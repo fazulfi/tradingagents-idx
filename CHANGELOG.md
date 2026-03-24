@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.2.0] - 2026-03-24
+
+### Added
+- Pluggable job store interface (`IJobStore`) with JSON (default) and Redis (experimental) backends (`frontend/lib/jobStoreInterface.ts`, `frontend/lib/jobStoreRedis.ts`)
+- `getJobStore()` factory function — selects backend via `JOB_STORE_BACKEND` env var (`json` | `redis`)
+- `REDIS_URL` env var support (default: `redis://localhost:6379`); falls back to JSON store if Redis unavailable
+- Health/metrics endpoint: `GET /api/jobs/metrics` — returns total, byStatus, oldestJob, newestJob, lastDiskWrite, storeBackend, uptime, nodeVersion
+- `lastDiskWrite` timestamp tracking in job store
+- Fake TradingAgents subprocess for CI testing (`tests/fake_tradingagents.py`) — deterministic marker output, `--fail` flag for error path testing
+- Job pipeline tests (`tests/test_job_pipeline.py`) — 8 pytest tests covering marker detection, JSON parsing, verdict detection, and exit code behaviour; no Next.js server required
+- Architecture documentation (`docs/ARCHITECTURE.md`) — system diagram, marker protocol, context injection, extension guides
+- Research workflow guide (`docs/RESEARCH_WORKFLOW.md`) — end-to-end example, Python notebook code, IDX data limitations, token cost reference
+- `ioredis` optional dependency in `frontend/package.json`
+
 ## [1.1.0] - 2026-03-24
 
 ### Fixed
