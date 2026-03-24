@@ -84,6 +84,8 @@ A fork of [TradingAgents by TauricResearch](https://github.com/TauricResearch/Tr
 
 ## 🏗️ Architecture
 
+> Full details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — ASCII system diagram, marker protocol, extension guides (new exchange, new data vendor, new verdict, Redis backend).
+
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                     Browser (Next.js 14)                     │
@@ -127,6 +129,8 @@ A fork of [TradingAgents by TauricResearch](https://github.com/TauricResearch/Tr
                   │  [TOKEN_USAGE] JSON → stdout                │
                   └─────────────────────────────────────────────┘
 ```
+
+**Research workflow guide:** [docs/RESEARCH_WORKFLOW.md](docs/RESEARCH_WORKFLOW.md) — end-to-end example with Python notebook code, IDX data notes, and token cost reference.
 
 **Data flow summary:**
 
@@ -289,6 +293,8 @@ The dashboard is now available at `http://localhost:3000`.
 |---|---|
 | `DASHBOARD_SECRET` | Server-side secret for API route authentication |
 | `NEXT_PUBLIC_DASHBOARD_SECRET` | Client-side copy of the same secret (must match) |
+| `JOB_STORE_BACKEND` | Job store backend: `json` (default) or `redis` (experimental) |
+| `REDIS_URL` | Redis connection URL (default: `redis://localhost:6379`); only used when `JOB_STORE_BACKEND=redis` |
 
 ### Runtime context variables (set automatically by the dashboard)
 
@@ -452,19 +458,40 @@ tradingagents-idx/
 │   │           ├── start/      # POST — spawn Python subprocess, create job
 │   │           ├── status/     # GET  — poll job state
 │   │           ├── cancel/     # DELETE — SIGTERM + mark cancelled
-│   │           └── list/       # GET — list all jobs
+│   │           ├── list/       # GET — list all jobs
+│   │           └── metrics/    # GET — health & metrics (total, byStatus, uptime)
 │   ├── components/
 │   │   ├── AgentPanel.tsx      # Scrolling agent output panel
 │   │   └── VerdictCard.tsx     # Final rating card with color coding
 │   └── lib/
 │       ├── jobStore.ts         # In-memory job map + jobs.json persistence
+│       ├── jobStoreInterface.ts# IJobStore interface
+│       ├── jobStoreRedis.ts    # Redis backend (experimental)
 │       └── utils.ts            # Ticker/date sanitization, verdict detection
 │
 ├── cli/                        # Interactive CLI (questionary + rich)
+├── docs/
+│   ├── ARCHITECTURE.md         # System diagram, marker protocol, extension guides
+│   └── RESEARCH_WORKFLOW.md    # End-to-end research example with Python notebook code
+├── tests/
+│   ├── fake_tradingagents.py   # Fake subprocess for CI pipeline tests
+│   └── test_job_pipeline.py    # Pytest job pipeline tests (no server required)
 ├── main.py                     # Quick-start Python script
 ├── .env.example                # API key template
 └── jobs.json                   # Auto-generated job persistence file
 ```
+
+### API Reference
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/api/jobs/start` | Start a new analysis job |
+| `GET` | `/api/jobs/status?id=<jobId>` | Poll job state and streamed sections |
+| `DELETE` | `/api/jobs/cancel?id=<jobId>` | Cancel a running job (SIGTERM) |
+| `GET` | `/api/jobs/list` | List all jobs (summary fields only) |
+| `GET` | `/api/jobs/metrics` | Health & metrics (total, byStatus, uptime, backend) |
+
+All endpoints require the `x-api-key: <DASHBOARD_SECRET>` header.
 
 ### Key customization points
 

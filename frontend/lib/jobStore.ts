@@ -74,9 +74,16 @@ const STORE_PATH = path.join(process.cwd(), "..", "jobs.json")
 
 const jobs = new Map<string, Job>()
 
+let lastDiskWrite: number | null = null
+
+export function getLastDiskWrite(): number | null {
+  return lastDiskWrite
+}
+
 function saveToDisk(): void {
   try {
     fs.writeFileSync(STORE_PATH, JSON.stringify(Array.from(jobs.entries())), "utf8")
+    lastDiskWrite = Date.now()
   } catch (_) {}
 }
 
@@ -157,4 +164,18 @@ export function deleteJob(id: string): void {
 
 export function listJobs(): Job[] {
   return Array.from(jobs.values())
+}
+
+export function getJobStore() {
+  const backend = process.env.JOB_STORE_BACKEND || "json"
+  if (backend === "redis") {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { RedisJobStore } = require("./jobStoreRedis")
+      return new RedisJobStore()
+    } catch (_) {
+      console.warn("[jobStore] Redis backend unavailable, falling back to JSON store")
+    }
+  }
+  return { createJob, getJob, updateJob, deleteJob, listJobs, cleanupOldJobs }
 }
