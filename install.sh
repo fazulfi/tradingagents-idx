@@ -17,7 +17,7 @@ conda create -n tradingagents python=3.13 -y
 
 # Install Python deps
 echo "[3/6] Installing Python dependencies..."
-conda run -n tradingagents pip install -r requirements.txt
+conda run -n tradingagents pip install -e .
 
 # Setup .env
 echo "[4/6] Setting up .env..."
