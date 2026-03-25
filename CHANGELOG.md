@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.3.0] - 2026-03-25
+
+### Added
+- IDX Market Intelligence API integration via RapidAPI for `.JK` tickers (`tradingagents/dataflows/idx_rapidapi.py`, `tradingagents/dataflows/idx_rapidapi_tools.py`)
+  - **Bandar Accumulation/Distribution** — detect if market makers are accumulating or distributing (Bandarmology)
+  - **Smart Money Flow** — track institutional and foreign investor movement
+  - **Pump & Dump Detection** — market manipulation risk signals
+  - **Foreign Ownership Trends** — foreign investor stake monitoring
+  - Rate limiting: 1 req/sec enforced, 1000 req/month with usage counter + auto-reset
+  - Request caching: 1-hour TTL with in-memory and disk persistence (`~/.tradingagents_idx_cache.json`)
+  - Monthly usage tracking with auto-reset (`~/.tradingagents_idx_usage.json`)
+  - Graceful degradation: returns empty string when no API key set or for non-`.JK` tickers
+  - IDX API usage badge in frontend header HUD (color-coded: blue / yellow >800 / red >950)
+- `IDX_RAPIDAPI_KEY` added to `.env.example` with documentation
+- IDX API usage exposed via `GET /api/jobs/metrics` (`idx_api` field)
+
 ## [1.2.0] - 2026-03-24
 
 ### Added

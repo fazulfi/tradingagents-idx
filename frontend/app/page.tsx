@@ -160,6 +160,10 @@ export default function Home() {
   const analysisStartTimeRef = useRef(0)
   const modelPricingRef = useRef<{ prompt: number; completion: number } | null>(null)
 
+  // IDX API usage state
+  type IdxApiUsage = { used: number; limit: number; remaining: number; month: string; available: boolean }
+  const [idxUsage, setIdxUsage] = useState<IdxApiUsage | null>(null)
+
   useEffect(() => {
     fetch("https://openrouter.ai/api/v1/models")
       .then(r => r.json())
@@ -206,6 +210,15 @@ export default function Home() {
     }
     return () => { if (timerRef.current) clearInterval(timerRef.current) }
   }, [running])
+
+  const fetchIdxUsage = useCallback(() => {
+    fetch("/api/jobs/metrics", { headers: { "x-api-key": process.env.NEXT_PUBLIC_DASHBOARD_SECRET || "" } })
+      .then(r => r.ok ? r.json() : null)
+      .then(data => { if (data?.idx_api) setIdxUsage(data.idx_api) })
+      .catch(() => {})
+  }, [])
+
+  useEffect(() => { fetchIdxUsage() }, [fetchIdxUsage])
 
   const filteredModels = models.filter(m =>
     m.id.toLowerCase().includes(modelSearch.toLowerCase()) ||
@@ -258,6 +271,7 @@ export default function Home() {
           elapsedSeconds: Math.floor((Date.now() - analysisStartTimeRef.current) / 1000),
         }
         setSessionHistory(prev => [run, ...prev].slice(0, 5))
+        fetchIdxUsage()
         if ("Notification" in window && Notification.permission === "granted") {
           new Notification("AI Trading War Room", {
             body: `${job.ticker} analysis complete — ${job.verdict ?? "Result ready"}`,
@@ -485,6 +499,15 @@ export default function Home() {
                   <span style={{ color: "#fbbf24" }}>⚠</span>
                 )}
               </div>
+            )}
+            {idxUsage?.available && (
+              <span style={{
+                color: idxUsage.used > 950 ? "#ef4444" : idxUsage.used > 800 ? "#eab308" : "#60a5fa",
+                fontSize: "11px",
+                fontFamily: "monospace",
+              }}>
+                IDX: {idxUsage.used}/{idxUsage.limit}
+              </span>
             )}
             {running && <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />}
             <span className="text-xs text-zinc-400 font-mono max-w-xs truncate">{status}</span>

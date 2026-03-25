@@ -30,7 +30,8 @@ from tradingagents.agents.utils.agent_utils import (
     get_income_statement,
     get_news,
     get_insider_transactions,
-    get_global_news
+    get_global_news,
+    get_idx_market_intelligence,
 )
 
 from .conditional_logic import ConditionalLogic
@@ -164,12 +165,16 @@ class TradingAgentsGraph:
                     get_stock_data,
                     # Technical indicators
                     get_indicators,
+                    # IDX-exclusive market intelligence (.JK tickers only)
+                    get_idx_market_intelligence,
                 ]
             ),
             "social": ToolNode(
                 [
                     # News tools for social media analysis
                     get_news,
+                    # IDX-exclusive market intelligence (.JK tickers only)
+                    get_idx_market_intelligence,
                 ]
             ),
             "news": ToolNode(

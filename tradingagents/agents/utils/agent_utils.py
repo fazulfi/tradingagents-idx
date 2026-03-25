@@ -19,6 +19,7 @@ from tradingagents.agents.utils.news_data_tools import (
     get_insider_transactions,
     get_global_news
 )
+from tradingagents.dataflows.idx_rapidapi_tools import get_idx_market_intelligence
 
 
 def build_instrument_context(ticker: str) -> str:
