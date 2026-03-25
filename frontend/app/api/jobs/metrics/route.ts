@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from "next/server"
 import { listJobs, getLastDiskWrite, getJobStore } from "@/lib/jobStore"
 import type { JobStatus } from "@/lib/jobStore"
+import fs from "fs"
+import os from "os"
+import path from "path"
 
 export async function GET(req: NextRequest) {
   const apiKey = req.headers.get("x-api-key")
@@ -35,6 +38,24 @@ export async function GET(req: NextRequest) {
   // Validate the store is accessible (calls getJobStore() for side-effect check)
   getJobStore()
 
+  // IDX API usage (written by Python side to ~/.tradingagents_idx_usage.json)
+  let idxApi = { used: 0, limit: 1000, remaining: 1000, month: "", available: false }
+  try {
+    const usageFile = path.join(os.homedir(), ".tradingagents_idx_usage.json")
+    const raw = fs.readFileSync(usageFile, "utf8")
+    const data = JSON.parse(raw)
+    const used = data.count ?? 0
+    idxApi = {
+      used,
+      limit: 1000,
+      remaining: 1000 - used,
+      month: data.month ?? "",
+      available: !!process.env.IDX_RAPIDAPI_KEY,
+    }
+  } catch {
+    idxApi.available = !!process.env.IDX_RAPIDAPI_KEY
+  }
+
   return NextResponse.json({
     total: jobs.length,
     byStatus,
@@ -44,5 +65,6 @@ export async function GET(req: NextRequest) {
     storeBackend: backend,
     uptime: process.uptime(),
     nodeVersion: process.version,
+    idx_api: idxApi,
   })
 }

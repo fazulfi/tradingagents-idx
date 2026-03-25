@@ -5,6 +5,7 @@ from tradingagents.agents.utils.agent_utils import (
     build_instrument_context,
     get_indicators,
     get_stock_data,
+    get_idx_market_intelligence,
 )
 from tradingagents.dataflows.config import get_config
 
@@ -18,6 +19,7 @@ def create_market_analyst(llm):
         tools = [
             get_stock_data,
             get_indicators,
+            get_idx_market_intelligence,
         ]
 
         system_message = (
