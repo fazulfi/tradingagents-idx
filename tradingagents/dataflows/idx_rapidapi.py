@@ -124,23 +124,23 @@ class IDXRapidAPI:
 
     def get_bandar_accumulation(self, ticker: str) -> dict:
         clean = self._clean_ticker(ticker)
-        return self._call(f"/api/emiten/{clean}/bandar/accumulation", ticker)
+        return self._call(f"/api/analysis/bandar/accumulation/{clean}", ticker)
 
     def get_bandar_distribution(self, ticker: str) -> dict:
         clean = self._clean_ticker(ticker)
-        return self._call(f"/api/emiten/{clean}/bandar/distribution", ticker)
+        return self._call(f"/api/analysis/bandar/distribution/{clean}", ticker)
 
     def get_smart_money_flow(self, ticker: str) -> dict:
         clean = self._clean_ticker(ticker)
-        return self._call(f"/api/emiten/{clean}/smartmoney", ticker)
+        return self._call(f"/api/analysis/bandar/smart-money/{clean}", ticker)
 
     def get_pump_dump_detection(self, ticker: str) -> dict:
         clean = self._clean_ticker(ticker)
-        return self._call(f"/api/analysis/pumpDump/{clean}", ticker)
+        return self._call(f"/api/analysis/bandar/pump-dump/{clean}", ticker)
 
     def get_foreign_ownership(self, ticker: str) -> dict:
         clean = self._clean_ticker(ticker)
-        return self._call(f"/api/emiten/{clean}/foreignOwnership", ticker)
+        return self._call(f"/api/emiten/{clean}/foreign-ownership", ticker)
 
     def get_usage(self) -> dict:
         used = self._usage.get("count", 0)
