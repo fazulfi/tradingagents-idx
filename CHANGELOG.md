@@ -2,6 +2,35 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.4.0] - 2026-03-26
+
+### Added
+- **Authentication system** — NextAuth v5 (beta) with Credentials provider; JWT session strategy; login page at `/login` with dark glass-panel UI matching the dashboard theme
+- **SQLite database** — Prisma 5.22 + SQLite (`frontend/prisma/dev.db`) for durable persistence of users, jobs, watchlist, and settings
+- **Per-user data isolation** — all jobs, watchlist entries, and IDX quota are scoped to the authenticated user; admin user seeded via `npx tsx scripts/seed.ts` (password controlled by `ADMIN_PASSWORD` env var, warns loudly if default `password123` is used)
+- **Watchlist** — persistent ticker watchlist stored in SQLite; `WatchlistPanel` component with add/remove chips and one-click ▶ analyze button
+- **Per-user IDX quota tracking** — IDX API usage reported from Python subprocess to Next.js via `POST /api/usage` (authenticated with `X-Internal-Secret` header); stored in `UserSettings.idxUsed` in SQLite replacing the shared disk file
+- **Login page** — `/login` with dark bg, dot-grid CSS, glass-panel card, green submit button, JetBrains Mono font; `x-api-key` header no longer required from the browser
+- **User dropdown** — fixed top-right header showing username, role badge (ADMIN=green), and sign-out button
+- `POST /api/usage` — internal endpoint for Python→Next.js IDX usage reporting; authenticated with `X-Internal-Secret`
+- `GET/POST/DELETE /api/watchlist` — watchlist CRUD API, per-user scoped
+- `frontend/auth.ts`, `frontend/auth.config.ts` — split NextAuth config (Edge-compatible base config for middleware; full Prisma+bcrypt config for API routes)
+- `frontend/middleware.ts` — Edge-compatible auth middleware; redirects unauthenticated requests to `/login`; allows `/login`, `/api/auth/*`, `/api/analyze` without auth
+- `frontend/lib/authHelpers.ts` — `getAuthenticatedUserId(req?)` helper: session-first, falls back to `x-api-key` → admin userId for backward compat
+- `frontend/lib/prisma.ts` — singleton PrismaClient with global caching to survive Next.js hot-reload
+- `frontend/scripts/seed.ts` — seeds admin user, migrates legacy `jobs.json` to SQLite
+
+### Fixed
+- **MARKET_ANALYST and SENTIMENT_ANALYST silently skipped** — `get_stock_data_online` and `get_news` tools used sync `requests` inside async LangGraph nodes, causing a coroutine conflict with the IDX async tool. Fixed by wrapping the sync tools in `asyncio.get_event_loop().run_in_executor(None, ...)` (ThreadPoolExecutor) inside the IDX async tool dispatcher so both sync and async tools can coexist in the same event loop.
+
+### Security
+- All API routes now require an authenticated session (NextAuth JWT) or a valid `x-api-key: <DASHBOARD_SECRET>` header (backward compat for CLI/scripts)
+- Jobs are isolated per-user — users cannot read, cancel, or view jobs belonging to other users
+- `INTERNAL_SECRET` env var protects the Python→Next.js `/api/usage` callback from external calls
+- Passwords hashed with bcrypt (12 rounds)
+- `ADMIN_PASSWORD` env var overrides the default seed password; server logs a loud warning if the default `password123` is used
+- `NEXT_PUBLIC_DASHBOARD_SECRET` no longer required in the browser; removed from all client-side fetch calls
+
 ## [1.3.0] - 2026-03-25
 
 ### Added

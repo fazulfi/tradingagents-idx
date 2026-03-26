@@ -28,6 +28,10 @@ A fork of [TradingAgents by TauricResearch](https://github.com/TauricResearch/Tr
 ### Web Dashboard
 - **Dark terminal UI** — monospace font, glass panels, animated agent indicators
 - **Background job queue** — analysis runs as a Python subprocess; closing the browser tab does not cancel it
+- 🔐 **Authentication** — NextAuth v5 Credentials login; sessions via JWT; login page at `/login`
+- 👤 **Per-user isolation** — jobs, watchlist, and IDX quota are scoped to each user; admin account seeded on first run
+- ⭐ **Watchlist** — persistent ticker watchlist with one-click analyze; stored in SQLite per user
+- 🔒 **Secure by default** — `x-api-key` header no longer required from the browser; session cookies used instead
 - **Resume by Job ID** — paste a job UUID at any time to reconnect to a running or completed analysis
 - **Job persistence** — job state written to `jobs.json` on every update; survives server restarts (stale running jobs are automatically marked as errored)
 - **Live log stream** — every section marker and status message shown in real time
@@ -259,6 +263,18 @@ The dashboard is now available at `http://localhost:3000`.
 
 **No separate Python server is needed.** The dashboard spawns Python subprocesses on demand.
 
+### 8. Initialize the database and seed the admin account
+
+```bash
+cd frontend
+DATABASE_URL="file:./prisma/dev.db" npx prisma db push
+npx tsx scripts/seed.ts
+```
+
+This creates the SQLite database and seeds an admin user. Default login: `admin` / `password123`.
+
+> ⚠️ **Security Note**: Set `ADMIN_PASSWORD` in `frontend/.env.local` before running the seed script (or before your first login) to use a strong password instead of the default.
+
 ---
 
 ## ⚙️ Configuration
@@ -297,10 +313,21 @@ The dashboard is now available at `http://localhost:3000`.
 
 | Variable | Description |
 |---|---|
-| `DASHBOARD_SECRET` | Server-side secret for API route authentication |
-| `NEXT_PUBLIC_DASHBOARD_SECRET` | Client-side copy of the same secret (must match) |
+| `DASHBOARD_SECRET` | Server-side secret for API route authentication (also accepts `x-api-key` for backward compat) |
+| `NEXT_PUBLIC_DASHBOARD_SECRET` | Client-side copy — only needed for legacy CLI/script access; not required for browser sessions |
 | `JOB_STORE_BACKEND` | Job store backend: `json` (default) or `redis` (experimental) |
 | `REDIS_URL` | Redis connection URL (default: `redis://localhost:6379`); only used when `JOB_STORE_BACKEND=redis` |
+
+### Auth environment variables (`frontend/.env.local`)
+
+| Variable | Required | Description |
+|---|---|---|
+| `DATABASE_URL` | Yes | SQLite path — `file:./prisma/dev.db` |
+| `NEXTAUTH_SECRET` | Yes | Secret for signing JWT sessions — generate with `openssl rand -base64 32` |
+| `NEXTAUTH_URL` | Yes | Full URL of the dashboard, e.g. `http://localhost:3000` or your server IP |
+| `ADMIN_PASSWORD` | Recommended | Password for the seeded admin account; defaults to `password123` with a loud warning |
+| `INTERNAL_SECRET` | Yes | Shared secret for the Python→Next.js `/api/usage` callback — generate with `openssl rand -base64 32` |
+| `NEXTJS_URL` | Yes | Internal URL the Python subprocess uses to report IDX usage — typically `http://localhost:3000` |
 
 ### Runtime context variables (set automatically by the dashboard)
 
@@ -489,15 +516,17 @@ tradingagents-idx/
 
 ### API Reference
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `POST` | `/api/jobs/start` | Start a new analysis job |
-| `GET` | `/api/jobs/status?id=<jobId>` | Poll job state and streamed sections |
-| `DELETE` | `/api/jobs/cancel?id=<jobId>` | Cancel a running job (SIGTERM) |
-| `GET` | `/api/jobs/list` | List all jobs (summary fields only) |
-| `GET` | `/api/jobs/metrics` | Health & metrics (total, byStatus, uptime, backend) |
+| Method | Endpoint | Auth | Description |
+|--------|----------|------|-------------|
+| `POST` | `/api/jobs/start` | Session / x-api-key | Start a new analysis job |
+| `GET` | `/api/jobs/status?id=<jobId>` | Session / x-api-key | Poll job state and streamed sections |
+| `DELETE` | `/api/jobs/cancel?id=<jobId>` | Session / x-api-key | Cancel a running job (SIGTERM) |
+| `GET` | `/api/jobs/list` | Session / x-api-key | List jobs for the authenticated user |
+| `GET` | `/api/jobs/metrics` | Session / x-api-key | Health & metrics (total, byStatus, uptime, IDX quota) |
+| `GET/POST/DELETE` | `/api/watchlist` | Session / x-api-key | Manage the authenticated user's ticker watchlist |
+| `POST` | `/api/usage` | X-Internal-Secret | Internal: increment IDX API usage counter (Python→Next.js) |
 
-All endpoints require the `x-api-key: <DASHBOARD_SECRET>` header.
+Browser sessions use NextAuth JWT cookies. CLI/scripts can use `x-api-key: <DASHBOARD_SECRET>` header as before.
 
 ### Key customization points
 
