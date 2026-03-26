@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from "react"
 import AgentPanel from "@/components/AgentPanel"
 import VerdictCard from "@/components/VerdictCard"
+import WatchlistPanel from "@/components/WatchlistPanel"
 
 type Sections = {
   market_analyst: string[]
@@ -212,7 +213,7 @@ export default function Home() {
   }, [running])
 
   const fetchIdxUsage = useCallback(() => {
-    fetch("/api/jobs/metrics", { headers: { "x-api-key": process.env.NEXT_PUBLIC_DASHBOARD_SECRET || "" } })
+    fetch("/api/jobs/metrics", {})
       .then(r => r.ok ? r.json() : null)
       .then(data => { if (data?.idx_api) setIdxUsage(data.idx_api) })
       .catch(() => {})
@@ -227,9 +228,7 @@ export default function Home() {
 
   const pollJob = useCallback(async (id: string) => {
     try {
-      const res = await fetch(`/api/jobs/status?id=${encodeURIComponent(id)}`, {
-        headers: { "x-api-key": process.env.NEXT_PUBLIC_DASHBOARD_SECRET || "" },
-      })
+      const res = await fetch(`/api/jobs/status?id=${encodeURIComponent(id)}`, {})
       if (!res.ok) return
       const job = await res.json()
 
@@ -294,6 +293,7 @@ export default function Home() {
         setRunning(false)
         setStatus("Cancelled")
       }
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     } catch (_) {}
   }, [])
 
@@ -303,8 +303,8 @@ export default function Home() {
       try {
         await fetch(`/api/jobs/cancel?id=${encodeURIComponent(jobId)}`, {
           method: "DELETE",
-          headers: { "x-api-key": process.env.NEXT_PUBLIC_DASHBOARD_SECRET || "" },
         })
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
       } catch (_) {}
     }
     setRunning(false)
@@ -329,10 +329,7 @@ export default function Home() {
     try {
       const res = await fetch("/api/jobs/start", {
         method: "POST",
-        headers: {
-          "x-api-key": process.env.NEXT_PUBLIC_DASHBOARD_SECRET || "",
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ticker, date, model, debate_rounds: debateRounds.toString() }),
       })
 
@@ -346,6 +343,7 @@ export default function Home() {
       const { jobId: newJobId } = await res.json()
       setJobId(newJobId)
       pollIntervalRef.current = setInterval(() => pollJob(newJobId), 2000)
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     } catch (_) {
       setStatus("Connection failed")
       setRunning(false)
@@ -355,9 +353,7 @@ export default function Home() {
   const handleResume = async (id: string) => {
     if (!id.trim()) return
     try {
-      const res = await fetch(`/api/jobs/status?id=${encodeURIComponent(id.trim())}`, {
-        headers: { "x-api-key": process.env.NEXT_PUBLIC_DASHBOARD_SECRET || "" },
-      })
+      const res = await fetch(`/api/jobs/status?id=${encodeURIComponent(id.trim())}`, {})
       if (!res.ok) { setStatus("Job not found"); return }
       const job = await res.json()
 
@@ -376,6 +372,7 @@ export default function Home() {
 
       setShowResume(false)
       setResumeInput("")
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     } catch (_) {
       setStatus("Failed to resume job")
     }
@@ -688,6 +685,9 @@ export default function Home() {
             </div>
           )}
         </div>
+
+        {/* Watchlist */}
+        <WatchlistPanel setTicker={setTicker} handleRun={handleRun} />
 
         {/* Live Log */}
         {logs.length > 0 && (

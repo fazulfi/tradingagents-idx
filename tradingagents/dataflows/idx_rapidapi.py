@@ -30,13 +30,19 @@ class IDXRapidAPI:
         self._mem_cache = {}
         self._cache_ttl = 3600
         self._cache_file = Path.home() / ".tradingagents_idx_cache.json"
-        self._usage_file = Path.home() / ".tradingagents_idx_usage.json"
         self._cache_healthy = True
         self._failure_count = 0
         self._circuit_open_until = 0.0
         self._last_error: str | None = None
         self._cache = self._load_cache()
+        # In-memory usage counter (not persisted to disk; per-user DB tracking
+        # is done via _report_usage() instead)
         self._usage = self._load_usage()
+
+        # Per-user usage reporting (set via env when running under Next.js worker)
+        self._user_id: str | None = os.getenv("IDX_USER_ID") or None
+        self._next_url: str = os.getenv("NEXTJS_URL", "http://localhost:3000")
+        self._internal_secret: str = os.getenv("INTERNAL_SECRET", "")
 
     def _clean_ticker(self, ticker: str) -> str:
         return ticker.upper().replace(".JK", "").strip()
@@ -58,23 +64,12 @@ class IDXRapidAPI:
             self._cache_healthy = False
 
     def _load_usage(self) -> dict:
-        current_month = datetime.now().strftime("%Y-%m")
-        try:
-            with open(self._usage_file, "r") as f:
-                data = json.load(f)
-            if data.get("month") != current_month:
-                return {"month": current_month, "count": 0}
-            return data
-        except (OSError, IOError, json.JSONDecodeError, ValueError) as e:
-            logging.warning(f"IDX usage load failed: {e}")
-            return {"month": current_month, "count": 0}
+        """Return in-memory usage counter (no disk I/O)."""
+        return {"month": datetime.now().strftime("%Y-%m"), "count": 0}
 
     def _save_usage(self):
-        try:
-            with open(self._usage_file, "w") as f:
-                json.dump(self._usage, f)
-        except (OSError, IOError) as e:
-            logging.warning(f"IDX usage save failed: {e}")
+        """No-op: usage is tracked per-user in the database via _report_usage()."""
+        pass
 
     def _check_usage(self):
         count = self._usage.get("count", 0)
@@ -82,6 +77,27 @@ class IDXRapidAPI:
             raise IDXRateLimitError("Monthly limit reached (1000 requests)")
         if count >= 800:
             logging.warning(f"IDX API: {count}/1000 requests used this month")
+
+    async def _report_usage(self, count: int = 1) -> None:
+        """Report IDX API usage to Next.js backend for per-user tracking.
+
+        No-op when running in CLI mode (IDX_USER_ID / INTERNAL_SECRET not set).
+        All exceptions are caught so a failed callback never crashes the worker.
+        """
+        if not self._user_id or not self._internal_secret:
+            return  # CLI mode — skip reporting
+        try:
+            async with httpx.AsyncClient() as client:
+                await client.post(
+                    f"{self._next_url}/api/usage",
+                    json={"userId": self._user_id, "count": count},
+                    headers={"X-Internal-Secret": self._internal_secret},
+                    timeout=httpx.Timeout(5.0),
+                )
+        except (httpx.ConnectError, httpx.TimeoutException) as e:
+            logging.warning(f"IDX usage report failed (non-fatal): {e}")
+        except Exception as e:
+            logging.warning(f"IDX usage report unexpected error (non-fatal): {e}")
 
     async def _call_async(self, endpoint: str, ticker: str) -> dict:
         if not self.api_key:
@@ -153,8 +169,10 @@ class IDXRapidAPI:
         self._cache[cache_key] = entry
         self._save_cache()
 
+        # Increment in-memory counter and report to DB (non-fatal if it fails)
         self._usage["count"] = self._usage.get("count", 0) + 1
-        self._save_usage()
+        self._save_usage()  # no-op, kept for test compatibility
+        await self._report_usage(1)
 
         return data
 

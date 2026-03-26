@@ -37,6 +37,7 @@ export class RedisJobStore implements IJobStore {
           this.fb = fallback()
         }
       })
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     } catch (err) {
       console.warn("[RedisJobStore] ioredis not available — using JSON fallback")
       this.fb = fallback()

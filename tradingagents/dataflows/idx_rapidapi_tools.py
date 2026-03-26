@@ -193,10 +193,7 @@ def _get_overall_bias(accum: dict, distrib: dict, smf: dict, pnd: dict, data_com
     return bias, reasoning
 
 
-@tool
-async def get_idx_market_intelligence(
-    ticker: Annotated[str, "Ticker symbol of the Indonesian stock (must end with .JK, e.g. BBCA.JK)"],
-) -> str:
+async def _get_idx_market_intelligence_async(ticker: str) -> str:
     """
     Get exclusive IDX market intelligence for Indonesian stocks (.JK tickers).
 
@@ -351,20 +348,88 @@ async def get_idx_market_intelligence(
     return header + "\n\n".join(sections) + footer
 
 
-def get_idx_market_intelligence_sync(ticker: str) -> str:
-    """Synchronous wrapper for contexts that cannot use async."""
+@tool
+def get_idx_market_intelligence(
+    ticker: Annotated[str, "Ticker symbol of the Indonesian stock (must end with .JK, e.g. BBCA.JK)"],
+) -> str:
+    """
+    Get exclusive IDX market intelligence for Indonesian stocks (.JK tickers).
+
+    Provides 5 data points NOT available from yfinance:
+    1. Bandar Accumulation -- detect if market makers are accumulating
+    2. Bandar Distribution -- detect if market makers are distributing/selling
+    3. Smart Money Flow -- track institutional and foreign investor movements
+    4. Pump & Dump Detection -- identify market manipulation risk
+    5. Foreign Ownership -- monitor foreign investor ownership trends
+
+    IMPORTANT: Only call this tool for Indonesian stocks with .JK suffix
+    (e.g., BBCA.JK, TLKM.JK, BBRI.JK). Returns empty string for other tickers.
+    This uses a rate-limited API (1000 req/month). Use only when needed.
+
+    DATA INTERPRETATION GUIDE:
+
+    BANDAR ACCUMULATION (accumulation_score 0-10):
+    - score 0-3: Heavy distribution (bandar selling aggressively)
+    - score 3-5: Neutral/no clear signal
+    - score 5-7: Mild accumulation (bandar starting to buy)
+    - score 7-10: Heavy accumulation (strong buy signal from market makers)
+    - status: ACCUMULATE = strong buy signal, NEUTRAL = wait, DISTRIBUTE = sell signal
+    - confidence: 0-100%, higher = more reliable signal
+
+    BANDAR DISTRIBUTION (distribution_score 0-10):
+    - score 0-4: No distribution (safe)
+    - score 4-6: Moderate distribution pressure (bandar partially selling)
+    - score 6-10: Heavy distribution (danger zone, bandar exiting)
+    - status: DISTRIBUTE = danger, NEUTRAL = ok, ACCUMULATE = bandar still buying
+
+    SMART MONEY FLOW (smart_money_score 0-10):
+    - score > 6: Smart money flowing IN (institutional buying)
+    - score 4-6: Neutral smart money activity
+    - score < 4: Smart money flowing OUT (institutional selling)
+    - flow_direction: IN = institutions buying, OUT = institutions selling
+    - Divergence from retail sentiment = strong signal
+
+    PUMP & DUMP RISK (risk_score 0-10):
+    - score 0-3: SAFE, normal trading activity
+    - score 3-5: CAUTION, some unusual activity detected
+    - score 5-7: WARNING, potential manipulation
+    - score 7-10: DANGER, high probability of pump & dump
+
+    FOREIGN OWNERSHIP:
+    - totalPctHeld: % of shares held by foreign institutions
+    - Increasing foreign ownership = positive signal (foreign confidence)
+    - Decreasing foreign ownership = negative signal (foreign exit)
+    - Major holders: Vanguard, BlackRock, Fidelity = quality institutional backing
+
+    COMBINED INTERPRETATION:
+    - High accumulation + high smart money + low pump dump = STRONG BUY signal
+    - High distribution + smart money OUT + high pump dump = STRONG SELL/AVOID signal
+    - Mixed signals = HOLD, wait for confirmation
+
+    IMPORTANT FOR ANALYSTS:
+    - DATA_UNAVAILABLE means IDX key not configured — treat all IDX signals as UNKNOWN
+    - PARTIAL_DATA means some endpoints failed — only use available sections
+    - RATE_LIMITED means monthly limit hit — treat all IDX signals as UNKNOWN
+    - Never interpret missing data as NEUTRAL or SAFE
+    - Empty or missing sections should trigger conservative analysis assumptions
+    """
     try:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
+        try:
+            asyncio.get_running_loop()
+            # A loop is already running (e.g. LangGraph async context) — run in a thread
             import nest_asyncio
             nest_asyncio.apply()
-            return loop.run_until_complete(
-                get_idx_market_intelligence.ainvoke({"ticker": ticker})
-            )
-        else:
-            return asyncio.run(
-                get_idx_market_intelligence.ainvoke({"ticker": ticker})
-            )
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor() as pool:
+                future = pool.submit(asyncio.run, _get_idx_market_intelligence_async(ticker))
+                return future.result(timeout=60)
+        except RuntimeError:
+            # No running loop — safe to use asyncio.run() directly
+            return asyncio.run(_get_idx_market_intelligence_async(ticker))
     except Exception as e:
-        logging.warning(f"IDX sync wrapper error: {e}")
-        return _DATA_UNAVAILABLE_MSG
+        logging.warning(f"IDX tool sync wrapper error: {e}")
+        return (
+            f"## IDX Market Intelligence: DATA_UNAVAILABLE\n"
+            f"**Reason**: Tool execution error: {e}\n"
+            f"**Analyst Note**: Treat IDX signals as UNKNOWN."
+        )

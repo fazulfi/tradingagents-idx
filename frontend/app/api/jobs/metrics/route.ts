@@ -1,59 +1,37 @@
 import { NextRequest, NextResponse } from "next/server"
-import { listJobs, getLastDiskWrite, getJobStore } from "@/lib/jobStore"
+import { prisma } from "@/lib/prisma"
+import { getAuthenticatedUserId } from "@/lib/authHelpers"
 import type { JobStatus } from "@/lib/jobStore"
-import fs from "fs"
-import os from "os"
-import path from "path"
 
 export async function GET(req: NextRequest) {
-  const apiKey = req.headers.get("x-api-key")
-  if (!apiKey || apiKey !== process.env.DASHBOARD_SECRET) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-  }
+  const userId = await getAuthenticatedUserId(req)
+  if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 
-  const jobs = listJobs()
+  const jobs = await prisma.job.findMany({ where: { userId } })
 
   const byStatus: Record<JobStatus, number> = {
-    pending: 0,
-    running: 0,
-    complete: 0,
-    error: 0,
-    cancelled: 0,
+    pending: 0, running: 0, complete: 0, error: 0, cancelled: 0,
   }
   for (const job of jobs) {
-    byStatus[job.status]++
+    const s = job.status as JobStatus
+    if (s in byStatus) byStatus[s]++
   }
 
   let oldestJob: string | null = null
   let newestJob: string | null = null
   if (jobs.length > 0) {
-    const sorted = [...jobs].sort((a, b) => a.createdAt - b.createdAt)
-    oldestJob = new Date(sorted[0].createdAt).toISOString()
-    newestJob = new Date(sorted[sorted.length - 1].createdAt).toISOString()
+    const sorted = [...jobs].sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())
+    oldestJob = sorted[0].createdAt.toISOString()
+    newestJob = sorted[sorted.length - 1].createdAt.toISOString()
   }
 
-  const lastDiskWrite = getLastDiskWrite()
-  const backend = process.env.JOB_STORE_BACKEND === "redis" ? "redis" : "json"
-
-  // Validate the store is accessible (calls getJobStore() for side-effect check)
-  getJobStore()
-
-  // IDX API usage (written by Python side to ~/.tradingagents_idx_usage.json)
-  let idxApi = { used: 0, limit: 1000, remaining: 1000, month: "", available: false }
-  try {
-    const usageFile = path.join(os.homedir(), ".tradingagents_idx_usage.json")
-    const raw = fs.readFileSync(usageFile, "utf8")
-    const data = JSON.parse(raw)
-    const used = data.count ?? 0
-    idxApi = {
-      used,
-      limit: 1000,
-      remaining: 1000 - used,
-      month: data.month ?? "",
-      available: !!process.env.IDX_RAPIDAPI_KEY,
-    }
-  } catch {
-    idxApi.available = !!process.env.IDX_RAPIDAPI_KEY
+  // Per-user IDX quota from UserSettings
+  const settings = await prisma.userSettings.findUnique({ where: { userId } })
+  const idxApi = {
+    used: settings?.idxUsed ?? 0,
+    limit: settings?.idxQuota ?? 1000,
+    remaining: (settings?.idxQuota ?? 1000) - (settings?.idxUsed ?? 0),
+    available: !!process.env.IDX_RAPIDAPI_KEY,
   }
 
   return NextResponse.json({
@@ -61,8 +39,7 @@ export async function GET(req: NextRequest) {
     byStatus,
     oldestJob,
     newestJob,
-    lastDiskWrite: lastDiskWrite ? new Date(lastDiskWrite).toISOString() : null,
-    storeBackend: backend,
+    storeBackend: "prisma",
     uptime: process.uptime(),
     nodeVersion: process.version,
     idx_api: idxApi,

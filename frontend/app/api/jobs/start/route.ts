@@ -10,12 +10,12 @@ import {
   MAX_JOBS,
   type Sections,
 } from "@/lib/jobStore"
+import { prisma } from "@/lib/prisma"
+import { getAuthenticatedUserId } from "@/lib/authHelpers"
 
 export async function POST(req: NextRequest) {
-  const authHeader = req.headers.get("x-api-key")
-  if (!process.env.DASHBOARD_SECRET || authHeader !== process.env.DASHBOARD_SECRET) {
-    return Response.json({ error: "Unauthorized" }, { status: 401 })
-  }
+  const userId = await getAuthenticatedUserId(req)
+  if (!userId) return Response.json({ error: "Unauthorized" }, { status: 401 })
 
   let body: { ticker?: unknown; date?: unknown; model?: unknown; debate_rounds?: unknown }
   try {
@@ -45,6 +45,11 @@ export async function POST(req: NextRequest) {
   const job = createJob(ticker, date, model, debateRounds)
   const jobId = job.id
 
+  // Persist job to SQLite with userId for per-user scoping
+  await prisma.job.create({
+    data: { id: jobId, userId, ticker, date, model, status: "pending" },
+  })
+
   const pythonPath = process.env.PYTHON_PATH ||
     (() => {
       const candidates = [
@@ -56,6 +61,7 @@ export async function POST(req: NextRequest) {
         "python3",
         "python"
       ]
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
       const { execSync } = require("child_process")
       for (const candidate of candidates) {
         try {
@@ -75,6 +81,8 @@ date          = sys.argv[2]
 root          = sys.argv[3]
 model         = sys.argv[4] if len(sys.argv) > 4 else "google/gemini-2.0-flash-001"
 debate_rounds = int(sys.argv[5]) if len(sys.argv) > 5 else 1
+user_id       = sys.argv[6] if len(sys.argv) > 6 else ""
+internal_secret = sys.argv[7] if len(sys.argv) > 7 else ""
 
 if not re.match(r"^[A-Z0-9.\\-]{1,12}$", ticker):
     print("[ERROR] Invalid ticker", flush=True)
@@ -89,6 +97,12 @@ os.chdir(root)
 
 from dotenv import load_dotenv
 load_dotenv()
+
+# Pass user context to Python backend for usage reporting
+if user_id:
+    os.environ["IDX_USER_ID"] = user_id
+if internal_secret:
+    os.environ["INTERNAL_SECRET"] = internal_secret
 
 import time, json, threading
 from langchain_core.callbacks import BaseCallbackHandler
@@ -236,12 +250,13 @@ print("[TOKEN_TOTAL] " + json.dumps({
 print("[COMPLETE]", flush=True)
 `
 
-  const proc = spawn(pythonPath, ["-c", script, ticker, date, projectRoot, model, debateRounds.toString()], {
+  const proc = spawn(pythonPath, ["-c", script, ticker, date, projectRoot, model, debateRounds.toString(), userId, process.env.INTERNAL_SECRET || ""], {
     cwd: projectRoot,
     env: { ...process.env, PYTHONPATH: projectRoot },
   })
 
   updateJob(jobId, { status: "running", pid: proc.pid })
+  prisma.job.update({ where: { id: jobId }, data: { status: "running" } }).catch(() => {})
 
   const MARKERS = [
     "MARKET_ANALYST", "FUNDAMENTALS_ANALYST", "SENTIMENT_ANALYST", "NEWS_ANALYST",
@@ -266,12 +281,16 @@ print("[COMPLETE]", flush=True)
           j.verdict = detectVerdict(j.sections.final_decision)
           j.logs.push("[COMPLETE] Done")
           j.updatedAt = Date.now()
+          // Persist to SQLite
+          prisma.job.update({ where: { id: jobId }, data: { status: "complete", result: JSON.stringify(j) } }).catch(() => {})
         } else if (found === "ERROR") {
           const msg = line.replace(/\[ERROR\]/g, "").trim()
           j.status = "error"
           j.error = msg
           j.logs.push("[ERROR] " + msg)
           j.updatedAt = Date.now()
+          // Persist to SQLite
+          prisma.job.update({ where: { id: jobId }, data: { status: "error", result: JSON.stringify(j) } }).catch(() => {})
         } else if (found === "STATUS") {
           const msg = line.split("[STATUS]")[1]?.trim()
           if (msg) {
@@ -288,6 +307,7 @@ print("[COMPLETE]", flush=True)
               j.tokenUsage.total += u.total
               j.tokenUsage.byAgent[u.agent] = { input: u.input, output: u.output, total: u.total, elapsed_ms: u.elapsed_ms }
               j.updatedAt = Date.now()
+            // eslint-disable-next-line @typescript-eslint/no-unused-vars
             } catch (_) {}
           }
         } else if (found === "TOKEN_TOTAL") {
@@ -297,6 +317,7 @@ print("[COMPLETE]", flush=True)
               const t = JSON.parse(jsonStr) as { input: number; output: number; total: number; elapsed_ms: number }
               Object.assign(j.tokenUsage, t)
               j.updatedAt = Date.now()
+            // eslint-disable-next-line @typescript-eslint/no-unused-vars
             } catch (_) {}
           }
         } else {
@@ -338,6 +359,8 @@ print("[COMPLETE]", flush=True)
       j.status = "error"
       j.error = code !== 0 ? `Process exited with code ${code}` : "Process ended unexpectedly"
       j.updatedAt = Date.now()
+      // Persist to SQLite
+      prisma.job.update({ where: { id: jobId }, data: { status: "error", result: JSON.stringify(j) } }).catch(() => {})
     }
   })
 

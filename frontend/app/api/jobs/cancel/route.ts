@@ -1,22 +1,29 @@
 import { NextRequest } from "next/server"
 import { getJob, updateJob } from "@/lib/jobStore"
+import { prisma } from "@/lib/prisma"
+import { getAuthenticatedUserId } from "@/lib/authHelpers"
 
 export async function DELETE(req: NextRequest) {
-  const authHeader = req.headers.get("x-api-key")
-  if (!process.env.DASHBOARD_SECRET || authHeader !== process.env.DASHBOARD_SECRET) {
-    return Response.json({ error: "Unauthorized" }, { status: 401 })
-  }
+  const userId = await getAuthenticatedUserId(req)
+  if (!userId) return Response.json({ error: "Unauthorized" }, { status: 401 })
 
   const id = req.nextUrl.searchParams.get("id")
   if (!id) return Response.json({ error: "Missing id" }, { status: 400 })
 
-  const job = getJob(id)
-  if (!job) return Response.json({ error: "Job not found" }, { status: 404 })
+  // Verify ownership
+  const dbJob = await prisma.job.findFirst({ where: { id, userId } })
+  if (!dbJob) return Response.json({ error: "Job not found" }, { status: 404 })
 
-  if (job.pid) {
-    try { process.kill(job.pid, "SIGTERM") } catch (_) {}
+  // Kill the process if running in memory
+  const liveJob = getJob(id)
+  if (liveJob?.pid) {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    try { process.kill(liveJob.pid, "SIGTERM") } catch (_) {}
   }
   updateJob(id, { status: "cancelled" })
+
+  // Update Prisma
+  await prisma.job.update({ where: { id }, data: { status: "cancelled" } })
 
   return Response.json({ cancelled: true })
 }

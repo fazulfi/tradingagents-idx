@@ -84,6 +84,7 @@ function saveToDisk(): void {
   try {
     fs.writeFileSync(STORE_PATH, JSON.stringify(Array.from(jobs.entries())), "utf8")
     lastDiskWrite = Date.now()
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   } catch (_) {}
 }
 
@@ -100,6 +101,7 @@ function loadFromDisk(): void {
       }
       jobs.set(id, job)
     }
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   } catch (_) {}
 }
 
@@ -173,6 +175,7 @@ export function getJobStore() {
       // eslint-disable-next-line @typescript-eslint/no-require-imports
       const { RedisJobStore } = require("./jobStoreRedis")
       return new RedisJobStore()
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     } catch (_) {
       console.warn("[jobStore] Redis backend unavailable, falling back to JSON store")
     }
