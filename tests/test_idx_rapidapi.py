@@ -1,12 +1,14 @@
 """
 Tests for IDX RapidAPI integration.
-Zero real API calls — all requests.get calls are mocked.
+Zero real API calls — all httpx.get calls are mocked.
 """
 import json
 import os
 import time
 import unittest
 from unittest.mock import MagicMock, patch, call
+
+import httpx
 
 
 class TestIDXRapidAPICleanTicker(unittest.TestCase):
@@ -35,7 +37,7 @@ class TestIDXRapidAPINoKey(unittest.TestCase):
         with patch.dict(os.environ, {}, clear=True):
             os.environ.pop("IDX_RAPIDAPI_KEY", None)
             api = IDXRapidAPI()
-        with patch("requests.get") as mock_get:
+        with patch("httpx.get") as mock_get:
             result = api._call("/api/emiten/BBCA/bandar/accumulation", "BBCA.JK")
             mock_get.assert_not_called()
             self.assertEqual(result, {})
@@ -58,7 +60,7 @@ class TestIDXRapidAPICache(unittest.TestCase):
         mock_response.json.return_value = {"signal": "accumulate"}
         mock_response.raise_for_status = MagicMock()
 
-        with patch("requests.get", return_value=mock_response) as mock_get, \
+        with patch("httpx.get", return_value=mock_response) as mock_get, \
              patch.object(api, "_save_cache"), \
              patch.object(api, "_save_usage"):
             # First call — hits the API
@@ -109,7 +111,7 @@ class TestIDXRapidAPIUsage(unittest.TestCase):
         mock_response.json.return_value = {"data": "value"}
         mock_response.raise_for_status = MagicMock()
 
-        with patch("requests.get", return_value=mock_response), \
+        with patch("httpx.get", return_value=mock_response), \
              patch.object(api, "_rate_limit"), \
              patch.object(api, "_save_usage"), \
              patch.object(api, "_save_cache"):
@@ -158,7 +160,7 @@ class TestIDXRapidAPIHTTPErrors(unittest.TestCase):
         mock_response = MagicMock()
         mock_response.status_code = 429
 
-        with patch("requests.get", return_value=mock_response), \
+        with patch("httpx.get", return_value=mock_response), \
              patch.object(api, "_rate_limit"):
             with self.assertRaises(IDXRateLimitError):
                 api._call("/api/emiten/BBCA/bandar/accumulation", "BBCA.JK")
@@ -168,17 +170,16 @@ class TestIDXRapidAPIHTTPErrors(unittest.TestCase):
         mock_response = MagicMock()
         mock_response.status_code = 404
 
-        with patch("requests.get", return_value=mock_response), \
+        with patch("httpx.get", return_value=mock_response), \
              patch.object(api, "_rate_limit"):
             result = api._call("/api/emiten/INVALID/bandar/accumulation", "INVALID.JK")
             self.assertEqual(result, {})
 
     def test_network_error_returns_partial_data(self):
         from tradingagents.dataflows.idx_rapidapi_tools import get_idx_market_intelligence
-        import requests
 
         with patch.dict(os.environ, {"IDX_RAPIDAPI_KEY": "test-key"}):
-            with patch("requests.get", side_effect=requests.exceptions.ConnectionError("Network error")):
+            with patch("httpx.get", side_effect=httpx.ConnectError("Network error")):
                 result = get_idx_market_intelligence.invoke({"ticker": "BBCA.JK"})
         self.assertIn("PARTIAL_DATA", result)
 
@@ -297,6 +298,85 @@ class TestIDXMarketIntelligenceTool(unittest.TestCase):
         from tradingagents.dataflows.idx_rapidapi_tools import get_idx_market_intelligence
         result = get_idx_market_intelligence.invoke({"ticker": "NVDA"})
         self.assertEqual(result, "")
+
+
+class TestIDXRapidAPICircuitBreaker(unittest.TestCase):
+    def _make_api(self):
+        from tradingagents.dataflows.idx_rapidapi import IDXRapidAPI
+        with patch.dict(os.environ, {"IDX_RAPIDAPI_KEY": "test-key"}):
+            api = IDXRapidAPI()
+        api._cache = {}
+        api._mem_cache = {}
+        return api
+
+    def test_circuit_breaker_opens_after_3_failures(self):
+        api = self._make_api()
+        with patch("httpx.get", side_effect=httpx.ConnectError("refused")), \
+             patch.object(api, "_rate_limit"):
+            for _ in range(3):
+                try:
+                    api._call("/api/test/BBCA", "BBCA")
+                except httpx.ConnectError:
+                    pass
+        self.assertGreater(api._circuit_open_until, time.time())
+
+    def test_circuit_breaker_skips_request_when_open(self):
+        api = self._make_api()
+        api._circuit_open_until = time.time() + 300
+        with patch("httpx.get") as mock_get:
+            result = api._call("/api/test/BBCA", "BBCA")
+        mock_get.assert_not_called()
+        self.assertEqual(result, {})
+
+    def test_circuit_breaker_resets_after_success(self):
+        api = self._make_api()
+        api._failure_count = 2
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"data": "ok"}
+        mock_response.raise_for_status = MagicMock()
+        with patch("httpx.get", return_value=mock_response), \
+             patch.object(api, "_rate_limit"), \
+             patch.object(api, "_save_cache"), \
+             patch.object(api, "_save_usage"):
+            api._call("/api/test/BBCA", "BBCA")
+        self.assertEqual(api._failure_count, 0)
+
+
+class TestIDXRapidAPIDiskIOErrors(unittest.TestCase):
+    def _make_api(self):
+        from tradingagents.dataflows.idx_rapidapi import IDXRapidAPI
+        with patch.dict(os.environ, {"IDX_RAPIDAPI_KEY": "test-key"}):
+            api = IDXRapidAPI()
+        return api
+
+    def test_disk_io_error_logs_warning_not_silent(self):
+        api = self._make_api()
+        with patch("builtins.open", side_effect=PermissionError("denied")), \
+             patch("logging.warning") as mock_warn:
+            api._save_cache()
+        mock_warn.assert_called_once()
+        self.assertIn("denied", mock_warn.call_args[0][0])
+
+    def test_cache_healthy_flag_set_false_on_save_error(self):
+        api = self._make_api()
+        api._cache_healthy = True
+        with patch("builtins.open", side_effect=PermissionError("denied")):
+            api._save_cache()
+        self.assertFalse(api._cache_healthy)
+
+
+class TestIDXRapidAPIGetUsageHealthFields(unittest.TestCase):
+    def test_get_usage_includes_health_fields(self):
+        from tradingagents.dataflows.idx_rapidapi import IDXRapidAPI
+        with patch.dict(os.environ, {"IDX_RAPIDAPI_KEY": "test-key"}):
+            api = IDXRapidAPI()
+        usage = api.get_usage()
+        self.assertIn("circuit_status", usage)
+        self.assertIn("cache_status", usage)
+        self.assertIn("last_error", usage)
+        self.assertEqual(usage["circuit_status"], "closed")
+        self.assertEqual(usage["cache_status"], "ok")
 
 
 if __name__ == "__main__":

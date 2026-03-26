@@ -1,9 +1,12 @@
 import os
 import json
 import logging
+import threading
 import time
 from datetime import datetime
 from pathlib import Path
+
+import httpx
 
 BASE_URL = "https://indonesia-stock-exchange-idx.p.rapidapi.com"
 
@@ -13,6 +16,9 @@ class IDXRateLimitError(Exception):
 
 
 class IDXRapidAPI:
+    FAILURE_THRESHOLD = 3
+    CIRCUIT_OPEN_DURATION = 300  # seconds
+
     def __init__(self):
         self.api_key = os.getenv("IDX_RAPIDAPI_KEY")
         self.headers = {
@@ -20,10 +26,15 @@ class IDXRapidAPI:
             "x-rapidapi-host": "indonesia-stock-exchange-idx.p.rapidapi.com",
         }
         self.last_request_time = 0.0
+        self._rate_lock = threading.Lock()
         self._mem_cache = {}
         self._cache_ttl = 3600
         self._cache_file = Path.home() / ".tradingagents_idx_cache.json"
         self._usage_file = Path.home() / ".tradingagents_idx_usage.json"
+        self._cache_healthy = True
+        self._failure_count = 0
+        self._circuit_open_until = 0.0
+        self._last_error: str | None = None
         self._cache = self._load_cache()
         self._usage = self._load_usage()
 
@@ -31,24 +42,29 @@ class IDXRapidAPI:
         return ticker.upper().replace(".JK", "").strip()
 
     def _rate_limit(self):
-        elapsed = time.time() - self.last_request_time
-        if elapsed < 1.0:
-            time.sleep(1.0 - elapsed)
-        self.last_request_time = time.time()
+        with self._rate_lock:
+            elapsed = time.time() - self.last_request_time
+            if elapsed < 1.0:
+                delta = 1.0 - elapsed
+                logging.debug(f"IDX rate limit: sleeping {delta:.2f}s")
+                time.sleep(delta)
+            self.last_request_time = time.time()
 
     def _load_cache(self) -> dict:
         try:
             with open(self._cache_file, "r") as f:
                 return json.load(f)
-        except Exception:
+        except Exception as e:
+            logging.warning(f"IDX cache load failed: {e}")
             return {}
 
     def _save_cache(self):
         try:
             with open(self._cache_file, "w") as f:
                 json.dump(self._cache, f)
-        except Exception:
-            pass
+        except Exception as e:
+            logging.warning(f"IDX cache save failed: {e}")
+            self._cache_healthy = False
 
     def _load_usage(self) -> dict:
         current_month = datetime.now().strftime("%Y-%m")
@@ -58,15 +74,16 @@ class IDXRapidAPI:
             if data.get("month") != current_month:
                 return {"month": current_month, "count": 0}
             return data
-        except Exception:
+        except Exception as e:
+            logging.warning(f"IDX usage load failed: {e}")
             return {"month": current_month, "count": 0}
 
     def _save_usage(self):
         try:
             with open(self._usage_file, "w") as f:
                 json.dump(self._usage, f)
-        except Exception:
-            pass
+        except Exception as e:
+            logging.warning(f"IDX usage save failed: {e}")
 
     def _check_usage(self):
         count = self._usage.get("count", 0)
@@ -96,21 +113,44 @@ class IDXRapidAPI:
                 return entry["data"]
 
         self._check_usage()
+
+        # Circuit breaker check
+        if time.time() < self._circuit_open_until:
+            logging.warning("IDX API circuit breaker OPEN, skipping request")
+            return {}
+
         self._rate_limit()
 
-        import requests
-
-        response = requests.get(
-            BASE_URL + endpoint, headers=self.headers, timeout=10
-        )
+        try:
+            response = httpx.get(
+                BASE_URL + endpoint,
+                headers=self.headers,
+                timeout=httpx.Timeout(10.0),
+            )
+        except (httpx.ConnectError, httpx.TimeoutException) as e:
+            self._failure_count += 1
+            self._last_error = str(e)
+            if self._failure_count >= self.FAILURE_THRESHOLD:
+                self._circuit_open_until = time.time() + self.CIRCUIT_OPEN_DURATION
+                logging.error("IDX API circuit breaker opened for 5 minutes")
+            raise
 
         if response.status_code == 429:
             raise IDXRateLimitError("API rate limit exceeded (HTTP 429)")
-        if response.status_code == 404:
+        if response.status_code in (401, 403, 404):
             return {}
+        if response.status_code >= 500:
+            self._failure_count += 1
+            self._last_error = f"HTTP {response.status_code}"
+            if self._failure_count >= self.FAILURE_THRESHOLD:
+                self._circuit_open_until = time.time() + self.CIRCUIT_OPEN_DURATION
+                logging.error("IDX API circuit breaker opened for 5 minutes")
+
         response.raise_for_status()
 
         data = response.json()
+        self._failure_count = 0
+        self._last_error = None
 
         entry = {"ts": time.time(), "data": data}
         self._mem_cache[cache_key] = entry
@@ -144,9 +184,13 @@ class IDXRapidAPI:
 
     def get_usage(self) -> dict:
         used = self._usage.get("count", 0)
+        now = time.time()
         return {
             "used": used,
             "limit": 1000,
             "remaining": 1000 - used,
             "month": self._usage.get("month", ""),
+            "circuit_status": "open" if now < self._circuit_open_until else "closed",
+            "cache_status": "degraded" if not self._cache_healthy else "ok",
+            "last_error": self._last_error,
         }
