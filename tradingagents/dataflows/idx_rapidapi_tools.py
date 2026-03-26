@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from typing import Annotated
 
@@ -193,7 +194,7 @@ def _get_overall_bias(accum: dict, distrib: dict, smf: dict, pnd: dict, data_com
 
 
 @tool
-def get_idx_market_intelligence(
+async def get_idx_market_intelligence(
     ticker: Annotated[str, "Ticker symbol of the Indonesian stock (must end with .JK, e.g. BBCA.JK)"],
 ) -> str:
     """
@@ -264,79 +265,56 @@ def get_idx_market_intelligence(
     if not api.api_key:
         return _DATA_UNAVAILABLE_MSG
 
+    results = await asyncio.gather(
+        api.get_bandar_accumulation(ticker),
+        api.get_bandar_distribution(ticker),
+        api.get_smart_money_flow(ticker),
+        api.get_pump_dump_detection(ticker),
+        api.get_foreign_ownership(ticker),
+        return_exceptions=True,
+    )
+
+    names = [
+        "Bandar Accumulation",
+        "Bandar Distribution",
+        "Smart Money Flow",
+        "Pump & Dump Detection",
+        "Foreign Ownership",
+    ]
+    interp_fns = [
+        _interpret_accumulation,
+        _interpret_distribution,
+        _interpret_smart_money,
+        _interpret_pump_dump,
+        _interpret_foreign_ownership,
+    ]
+    section_titles = [
+        "Bandar Accumulation",
+        "Bandar Distribution",
+        "Smart Money Flow",
+        "Pump & Dump Risk Assessment",
+        "Foreign Ownership Trends",
+    ]
+
     sections = []
     succeeded = []
     failed = []
-    accum, distrib, smf, pnd = {}, {}, {}, {}
+    endpoint_data = [{} for _ in range(5)]
 
-    try:
-        try:
-            accum = api.get_bandar_accumulation(ticker)
-            if accum:
-                succeeded.append("Bandar Accumulation")
-                sections.append(f"### Bandar Accumulation\n{_interpret_accumulation(accum)}")
-            else:
-                failed.append("Bandar Accumulation")
-        except IDXRateLimitError:
-            raise
-        except Exception as e:
-            failed.append("Bandar Accumulation")
-            logging.warning(f"IDX Bandar Accumulation failed for {ticker}: {e}")
+    for i, (name, result) in enumerate(zip(names, results)):
+        if isinstance(result, IDXRateLimitError):
+            return _RATE_LIMITED_MSG
+        elif isinstance(result, Exception):
+            failed.append(name)
+            logging.warning(f"IDX {name} failed for {ticker}: {result}")
+        elif result:
+            succeeded.append(name)
+            endpoint_data[i] = result
+            sections.append(f"### {section_titles[i]}\n{interp_fns[i](result)}")
+        else:
+            failed.append(name)
 
-        try:
-            distrib = api.get_bandar_distribution(ticker)
-            if distrib:
-                succeeded.append("Bandar Distribution")
-                sections.append(f"### Bandar Distribution\n{_interpret_distribution(distrib)}")
-            else:
-                failed.append("Bandar Distribution")
-        except IDXRateLimitError:
-            raise
-        except Exception as e:
-            failed.append("Bandar Distribution")
-            logging.warning(f"IDX Bandar Distribution failed for {ticker}: {e}")
-
-        try:
-            smf = api.get_smart_money_flow(ticker)
-            if smf:
-                succeeded.append("Smart Money Flow")
-                sections.append(f"### Smart Money Flow\n{_interpret_smart_money(smf)}")
-            else:
-                failed.append("Smart Money Flow")
-        except IDXRateLimitError:
-            raise
-        except Exception as e:
-            failed.append("Smart Money Flow")
-            logging.warning(f"IDX Smart Money Flow failed for {ticker}: {e}")
-
-        try:
-            pnd = api.get_pump_dump_detection(ticker)
-            if pnd:
-                succeeded.append("Pump & Dump Detection")
-                sections.append(f"### Pump & Dump Risk Assessment\n{_interpret_pump_dump(pnd)}")
-            else:
-                failed.append("Pump & Dump Detection")
-        except IDXRateLimitError:
-            raise
-        except Exception as e:
-            failed.append("Pump & Dump Detection")
-            logging.warning(f"IDX Pump & Dump Detection failed for {ticker}: {e}")
-
-        try:
-            foreign = api.get_foreign_ownership(ticker)
-            if foreign:
-                succeeded.append("Foreign Ownership")
-                sections.append(f"### Foreign Ownership Trends\n{_interpret_foreign_ownership(foreign)}")
-            else:
-                failed.append("Foreign Ownership")
-        except IDXRateLimitError:
-            raise
-        except Exception as e:
-            failed.append("Foreign Ownership")
-            logging.warning(f"IDX Foreign Ownership failed for {ticker}: {e}")
-
-    except IDXRateLimitError:
-        return _RATE_LIMITED_MSG
+    accum, distrib, smf, pnd, _ = endpoint_data
 
     if not succeeded:
         unavail = "\n".join(f"- {x}" for x in failed)
@@ -371,3 +349,22 @@ def get_idx_market_intelligence(
     header = f"## IDX Market Intelligence: {ticker}\n\n"
     footer = f"\n\n---\nIDX API Usage this month: {usage['used']}/{usage['limit']}"
     return header + "\n\n".join(sections) + footer
+
+
+def get_idx_market_intelligence_sync(ticker: str) -> str:
+    """Synchronous wrapper for contexts that cannot use async."""
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            import nest_asyncio
+            nest_asyncio.apply()
+            return loop.run_until_complete(
+                get_idx_market_intelligence.ainvoke({"ticker": ticker})
+            )
+        else:
+            return asyncio.run(
+                get_idx_market_intelligence.ainvoke({"ticker": ticker})
+            )
+    except Exception as e:
+        logging.warning(f"IDX sync wrapper error: {e}")
+        return _DATA_UNAVAILABLE_MSG

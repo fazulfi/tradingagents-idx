@@ -1,7 +1,7 @@
-import os
+import asyncio
 import json
 import logging
-import threading
+import os
 import time
 from datetime import datetime
 from pathlib import Path
@@ -26,7 +26,7 @@ class IDXRapidAPI:
             "x-rapidapi-host": "indonesia-stock-exchange-idx.p.rapidapi.com",
         }
         self.last_request_time = 0.0
-        self._rate_lock = threading.Lock()
+        self._rate_semaphore = asyncio.Semaphore(1)
         self._mem_cache = {}
         self._cache_ttl = 3600
         self._cache_file = Path.home() / ".tradingagents_idx_cache.json"
@@ -41,20 +41,11 @@ class IDXRapidAPI:
     def _clean_ticker(self, ticker: str) -> str:
         return ticker.upper().replace(".JK", "").strip()
 
-    def _rate_limit(self):
-        with self._rate_lock:
-            elapsed = time.time() - self.last_request_time
-            if elapsed < 1.0:
-                delta = 1.0 - elapsed
-                logging.debug(f"IDX rate limit: sleeping {delta:.2f}s")
-                time.sleep(delta)
-            self.last_request_time = time.time()
-
     def _load_cache(self) -> dict:
         try:
             with open(self._cache_file, "r") as f:
                 return json.load(f)
-        except Exception as e:
+        except (OSError, IOError, json.JSONDecodeError, ValueError) as e:
             logging.warning(f"IDX cache load failed: {e}")
             return {}
 
@@ -62,7 +53,7 @@ class IDXRapidAPI:
         try:
             with open(self._cache_file, "w") as f:
                 json.dump(self._cache, f)
-        except Exception as e:
+        except (OSError, IOError) as e:
             logging.warning(f"IDX cache save failed: {e}")
             self._cache_healthy = False
 
@@ -74,7 +65,7 @@ class IDXRapidAPI:
             if data.get("month") != current_month:
                 return {"month": current_month, "count": 0}
             return data
-        except Exception as e:
+        except (OSError, IOError, json.JSONDecodeError, ValueError) as e:
             logging.warning(f"IDX usage load failed: {e}")
             return {"month": current_month, "count": 0}
 
@@ -82,7 +73,7 @@ class IDXRapidAPI:
         try:
             with open(self._usage_file, "w") as f:
                 json.dump(self._usage, f)
-        except Exception as e:
+        except (OSError, IOError) as e:
             logging.warning(f"IDX usage save failed: {e}")
 
     def _check_usage(self):
@@ -92,7 +83,7 @@ class IDXRapidAPI:
         if count >= 800:
             logging.warning(f"IDX API: {count}/1000 requests used this month")
 
-    def _call(self, endpoint: str, ticker: str) -> dict:
+    async def _call_async(self, endpoint: str, ticker: str) -> dict:
         if not self.api_key:
             return {}
 
@@ -119,14 +110,19 @@ class IDXRapidAPI:
             logging.warning("IDX API circuit breaker OPEN, skipping request")
             return {}
 
-        self._rate_limit()
+        # Rate limiting — serialized via semaphore, HTTP runs concurrently after
+        async with self._rate_semaphore:
+            elapsed = time.time() - self.last_request_time
+            await asyncio.sleep(max(0, 1.0 - elapsed))
+            self.last_request_time = time.time()
 
         try:
-            response = httpx.get(
-                BASE_URL + endpoint,
-                headers=self.headers,
-                timeout=httpx.Timeout(10.0),
-            )
+            async with httpx.AsyncClient() as client:
+                response = await client.get(
+                    BASE_URL + endpoint,
+                    headers=self.headers,
+                    timeout=httpx.Timeout(10.0),
+                )
         except (httpx.ConnectError, httpx.TimeoutException) as e:
             self._failure_count += 1
             self._last_error = str(e)
@@ -162,25 +158,25 @@ class IDXRapidAPI:
 
         return data
 
-    def get_bandar_accumulation(self, ticker: str) -> dict:
+    async def get_bandar_accumulation(self, ticker: str) -> dict:
         clean = self._clean_ticker(ticker)
-        return self._call(f"/api/analysis/bandar/accumulation/{clean}", ticker)
+        return await self._call_async(f"/api/analysis/bandar/accumulation/{clean}", ticker)
 
-    def get_bandar_distribution(self, ticker: str) -> dict:
+    async def get_bandar_distribution(self, ticker: str) -> dict:
         clean = self._clean_ticker(ticker)
-        return self._call(f"/api/analysis/bandar/distribution/{clean}", ticker)
+        return await self._call_async(f"/api/analysis/bandar/distribution/{clean}", ticker)
 
-    def get_smart_money_flow(self, ticker: str) -> dict:
+    async def get_smart_money_flow(self, ticker: str) -> dict:
         clean = self._clean_ticker(ticker)
-        return self._call(f"/api/analysis/bandar/smart-money/{clean}", ticker)
+        return await self._call_async(f"/api/analysis/bandar/smart-money/{clean}", ticker)
 
-    def get_pump_dump_detection(self, ticker: str) -> dict:
+    async def get_pump_dump_detection(self, ticker: str) -> dict:
         clean = self._clean_ticker(ticker)
-        return self._call(f"/api/analysis/bandar/pump-dump/{clean}", ticker)
+        return await self._call_async(f"/api/analysis/bandar/pump-dump/{clean}", ticker)
 
-    def get_foreign_ownership(self, ticker: str) -> dict:
+    async def get_foreign_ownership(self, ticker: str) -> dict:
         clean = self._clean_ticker(ticker)
-        return self._call(f"/api/emiten/{clean}/foreign-ownership", ticker)
+        return await self._call_async(f"/api/emiten/{clean}/foreign-ownership", ticker)
 
     def get_usage(self) -> dict:
         used = self._usage.get("count", 0)
