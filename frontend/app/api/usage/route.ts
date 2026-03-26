@@ -1,3 +1,4 @@
+import crypto from "crypto"
 import { NextRequest } from "next/server"
 import { prisma } from "@/lib/prisma"
 
@@ -5,7 +6,13 @@ import { prisma } from "@/lib/prisma"
 // Auth: X-Internal-Secret header must match INTERNAL_SECRET env var.
 export async function POST(req: NextRequest) {
   const secret = req.headers.get("x-internal-secret")
-  if (!process.env.INTERNAL_SECRET || secret !== process.env.INTERNAL_SECRET) {
+  const envSecret = process.env.INTERNAL_SECRET
+  if (
+    !secret ||
+    !envSecret ||
+    secret.length !== envSecret.length ||
+    !crypto.timingSafeEqual(Buffer.from(secret), Buffer.from(envSecret))
+  ) {
     return Response.json({ error: "Unauthorized" }, { status: 401 })
   }
 
