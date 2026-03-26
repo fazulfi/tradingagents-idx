@@ -173,14 +173,14 @@ class TestIDXRapidAPIHTTPErrors(unittest.TestCase):
             result = api._call("/api/emiten/INVALID/bandar/accumulation", "INVALID.JK")
             self.assertEqual(result, {})
 
-    def test_network_error_returns_empty_string_gracefully(self):
+    def test_network_error_returns_partial_data(self):
         from tradingagents.dataflows.idx_rapidapi_tools import get_idx_market_intelligence
         import requests
 
         with patch.dict(os.environ, {"IDX_RAPIDAPI_KEY": "test-key"}):
             with patch("requests.get", side_effect=requests.exceptions.ConnectionError("Network error")):
                 result = get_idx_market_intelligence.invoke({"ticker": "BBCA.JK"})
-        self.assertEqual(result, "")
+        self.assertIn("PARTIAL_DATA", result)
 
 
 class TestIDXMarketIntelligenceTool(unittest.TestCase):
@@ -230,6 +230,73 @@ class TestIDXMarketIntelligenceTool(unittest.TestCase):
                 result = get_idx_market_intelligence.invoke({"ticker": "BBCA.JK"})
 
         self.assertIn("IDX API Usage this month: 42/1000", result)
+
+    def test_no_api_key_returns_data_unavailable(self):
+        from tradingagents.dataflows.idx_rapidapi_tools import get_idx_market_intelligence
+
+        with patch.dict(os.environ, {}, clear=True):
+            os.environ.pop("IDX_RAPIDAPI_KEY", None)
+            result = get_idx_market_intelligence.invoke({"ticker": "BBCA.JK"})
+
+        self.assertIn("DATA_UNAVAILABLE", result)
+        self.assertIn("IDX_RAPIDAPI_KEY not configured", result)
+        self.assertIn("UNKNOWN", result)
+
+    def test_all_endpoints_fail_returns_partial_data(self):
+        from tradingagents.dataflows.idx_rapidapi_tools import get_idx_market_intelligence
+        from tradingagents.dataflows.idx_rapidapi import IDXRapidAPI
+
+        with patch.dict(os.environ, {"IDX_RAPIDAPI_KEY": "test-key"}):
+            with patch.object(IDXRapidAPI, "get_bandar_accumulation", return_value={}), \
+                 patch.object(IDXRapidAPI, "get_bandar_distribution", return_value={}), \
+                 patch.object(IDXRapidAPI, "get_smart_money_flow", return_value={}), \
+                 patch.object(IDXRapidAPI, "get_pump_dump_detection", return_value={}), \
+                 patch.object(IDXRapidAPI, "get_foreign_ownership", return_value={}):
+                result = get_idx_market_intelligence.invoke({"ticker": "BBCA.JK"})
+
+        self.assertIn("PARTIAL_DATA", result)
+        self.assertIn("UNKNOWN", result)
+
+    def test_some_endpoints_fail_returns_partial_with_warning(self):
+        from tradingagents.dataflows.idx_rapidapi_tools import get_idx_market_intelligence
+        from tradingagents.dataflows.idx_rapidapi import IDXRapidAPI
+
+        sample_data = {"accumulation_score": 7, "distribution_score": 3,
+                       "smart_money_score": 7, "risk_score": 2, "status": "ACCUMULATE",
+                       "confidence": 80, "flow_direction": "IN"}
+
+        with patch.dict(os.environ, {"IDX_RAPIDAPI_KEY": "test-key"}):
+            with patch.object(IDXRapidAPI, "get_bandar_accumulation", return_value=sample_data), \
+                 patch.object(IDXRapidAPI, "get_bandar_distribution", return_value=sample_data), \
+                 patch.object(IDXRapidAPI, "get_smart_money_flow", return_value=sample_data), \
+                 patch.object(IDXRapidAPI, "get_pump_dump_detection", return_value={}), \
+                 patch.object(IDXRapidAPI, "get_foreign_ownership", return_value={}), \
+                 patch.object(IDXRapidAPI, "get_usage", return_value={"used": 3, "limit": 1000, "remaining": 997, "month": "2026-03"}):
+                result = get_idx_market_intelligence.invoke({"ticker": "BBCA.JK"})
+
+        self.assertIn("Bandar Accumulation", result)
+        self.assertIn("Bandar Distribution", result)
+        self.assertIn("Smart Money Flow", result)
+        self.assertIn("PARTIAL_DATA", result)
+        self.assertIn("Pump & Dump Detection", result)
+        self.assertIn("Foreign Ownership", result)
+
+    def test_rate_limit_returns_rate_limited_message(self):
+        from tradingagents.dataflows.idx_rapidapi_tools import get_idx_market_intelligence
+        from tradingagents.dataflows.idx_rapidapi import IDXRapidAPI, IDXRateLimitError
+
+        with patch.dict(os.environ, {"IDX_RAPIDAPI_KEY": "test-key"}):
+            with patch.object(IDXRapidAPI, "get_bandar_accumulation",
+                              side_effect=IDXRateLimitError("Monthly limit reached")):
+                result = get_idx_market_intelligence.invoke({"ticker": "BBCA.JK"})
+
+        self.assertIn("RATE_LIMITED", result)
+        self.assertIn("UNKNOWN", result)
+
+    def test_non_jk_still_returns_empty_string(self):
+        from tradingagents.dataflows.idx_rapidapi_tools import get_idx_market_intelligence
+        result = get_idx_market_intelligence.invoke({"ticker": "NVDA"})
+        self.assertEqual(result, "")
 
 
 if __name__ == "__main__":
