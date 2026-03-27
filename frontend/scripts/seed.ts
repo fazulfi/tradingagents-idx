@@ -32,6 +32,7 @@ async function main() {
     },
   })
   console.log(`✓ Admin user: ${admin.id} (${admin.username})`)
+  console.log(`\n📝 Add to .env.local:\n   ADMIN_USER_ID=${admin.id}\n`)
 
   // Upsert UserSettings for admin
   await prisma.userSettings.upsert({
