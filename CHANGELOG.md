@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.5.0] - 2026-03-27
+
+### Changed
+- **Migrated job store from in-memory Map + `jobs.json` to SQLite via Prisma** — all job state (sections, logs, tokenUsage, verdict, error, pid) now persisted in the database and survives server restarts
+- **Removed all `fs.writeFileSync`/`fs.readFileSync` from the request path** — no more event loop blocking on every job update; Prisma handles persistence asynchronously
+- **Next.js process is now fully stateless** — in-flight streaming state is closure-scoped to the active request; completed results always readable from SQLite
+- **Expanded Job schema** — added `sections`, `logs`, `tokenUsage`, `pid`, `debateRounds`, `verdict`, `error` columns for live streaming data
+- **`status/route.ts`** — simplified to always read from Prisma (no more dual in-memory + DB lookup)
+- **`cancel/route.ts`** — reads `pid` from Prisma to kill the subprocess; no in-memory fallback
+- **`list/route.ts`** — reads `verdict` from dedicated DB column instead of parsing `result` JSON blob
+- **`start/route.ts`** — concurrent job check now uses `prisma.job.count()` instead of in-memory Map iteration
+
+### Removed
+- `frontend/lib/jobStore.ts` — in-memory Map + `jobs.json` file-backed store deleted
+- Global in-memory job tracking (Map) — replaced by closure-scoped local state during streaming + Prisma persistence
+- Dual-write pattern (Map + SQLite) — single source of truth is now SQLite
+
 ## [1.4.0] - 2026-03-26
 
 ### Added

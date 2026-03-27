@@ -29,13 +29,27 @@ model Session {
 }
 
 model Job {
-  id        String   @id
-  userId    String
-  ticker    String
-  date      String
-  model     String
-  status    String
-  result    String?
+  id           String   @id
+  userId       String
+  ticker       String
+  date         String
+  model        String
+  debateRounds Int      @default(1)
+  status       String   @default("pending")
+  pid          Int?
+
+  // Live streaming fields (JSON strings updated during analysis)
+  sections   String @default("{}")
+  logs       String @default("[]")
+  tokenUsage String @default("{}")
+
+  // Final result fields
+  verdict String?
+  error   String?
+
+  // Legacy blob — kept for backwards compat with existing completed jobs
+  result String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)

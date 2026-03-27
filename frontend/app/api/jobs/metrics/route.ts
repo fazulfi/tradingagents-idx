@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import { getAuthenticatedUserId } from "@/lib/authHelpers"
-import type { JobStatus } from "@/lib/jobStore"
+import type { JobStatus } from "@/lib/jobStoreInterface"
 
 export async function GET(req: NextRequest) {
   const userId = await getAuthenticatedUserId(req)

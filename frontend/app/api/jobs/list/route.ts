@@ -12,26 +12,15 @@ export async function GET(req: NextRequest) {
   })
 
   return Response.json(
-    jobs.map((job) => {
-      let verdict: string | undefined
-      if (job.status === "complete" && job.result) {
-        try {
-          const parsed = JSON.parse(job.result) as { verdict?: string }
-          verdict = parsed.verdict
-        } catch {
-          verdict = undefined
-        }
-      }
-      return {
-        id: job.id,
-        status: job.status,
-        ticker: job.ticker,
-        date: job.date,
-        model: job.model,
-        verdict,
-        createdAt: job.createdAt.getTime(),
-        updatedAt: job.updatedAt.getTime(),
-      }
-    })
+    jobs.map((job) => ({
+      id: job.id,
+      status: job.status,
+      ticker: job.ticker,
+      date: job.date,
+      model: job.model,
+      verdict: job.verdict ?? undefined,
+      createdAt: job.createdAt.getTime(),
+      updatedAt: job.updatedAt.getTime(),
+    }))
   )
 }

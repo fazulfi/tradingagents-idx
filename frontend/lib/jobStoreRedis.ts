@@ -1,16 +1,15 @@
 // EXPERIMENTAL - not recommended for production
 // Enable with: JOB_STORE_BACKEND=redis REDIS_URL=redis://localhost:6379
 
-import type { IJobStore } from "./jobStoreInterface"
-import type { Job } from "./jobStore"
-import { createJob as jsonCreateJob, getJob as jsonGetJob, updateJob as jsonUpdateJob, deleteJob as jsonDeleteJob, listJobs as jsonListJobs, cleanupOldJobs as jsonCleanupOldJobs } from "./jobStore"
+import type { IJobStore, Job } from "./jobStoreInterface"
+import { PrismaJobStore } from "./jobStorePrisma"
 
 const REDIS_URL = process.env.REDIS_URL || "redis://localhost:6379"
 const KEY_PREFIX = "ta:job:"
 const INDEX_KEY = "ta:jobs"
 
 function fallback(): IJobStore {
-  return { createJob: jsonCreateJob, getJob: jsonGetJob, updateJob: jsonUpdateJob, deleteJob: jsonDeleteJob, listJobs: jsonListJobs, cleanupOldJobs: jsonCleanupOldJobs }
+  return new PrismaJobStore()
 }
 
 export class RedisJobStore implements IJobStore {
@@ -27,7 +26,7 @@ export class RedisJobStore implements IJobStore {
       this.client.connect().then(() => {
         this.ready = true
       }).catch((err: Error) => {
-        console.warn("[RedisJobStore] Connection failed:", err.message, "— using JSON fallback")
+        console.warn("[RedisJobStore] Connection failed:", err.message, "— using Prisma fallback")
         this.fb = fallback()
       })
       this.client.on("error", (err: Error) => {
@@ -39,50 +38,60 @@ export class RedisJobStore implements IJobStore {
       })
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     } catch (err) {
-      console.warn("[RedisJobStore] ioredis not available — using JSON fallback")
+      console.warn("[RedisJobStore] ioredis not available — using Prisma fallback")
       this.fb = fallback()
     }
   }
 
-  createJob(ticker: string, date: string, model: string, debateRounds: number): Job {
-    if (this.fb) return this.fb.createJob(ticker, date, model, debateRounds)
-    // Synchronous fallback: Redis ops are async, so we delegate to JSON store
-    // and fire-and-forget a background sync. For truly async Redis, migrate to
-    // Next.js Route Handlers with await.
-    const job = jsonCreateJob(ticker, date, model, debateRounds)
+  async createJob(ticker: string, date: string, model: string, debateRounds: number, userId: string): Promise<Job> {
+    if (this.fb) return this.fb.createJob(ticker, date, model, debateRounds, userId)
+    // Redis ops are async; create via Prisma and sync to Redis
+    const job = await fallback().createJob(ticker, date, model, debateRounds, userId)
     this._setAsync(job).catch(() => {})
     return job
   }
 
-  getJob(id: string): Job | undefined {
+  async getJob(id: string): Promise<Job | undefined> {
     if (this.fb) return this.fb.getJob(id)
-    return jsonGetJob(id)
+    if (!this.ready) return fallback().getJob(id)
+    try {
+      const raw = await this.client.get(KEY_PREFIX + id)
+      if (!raw) return undefined
+      return JSON.parse(raw) as Job
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    } catch (_) {
+      return fallback().getJob(id)
+    }
   }
 
-  updateJob(id: string, partial: Partial<Job>): void {
+  async updateJob(id: string, partial: Partial<Job>): Promise<void> {
     if (this.fb) return this.fb.updateJob(id, partial)
-    jsonUpdateJob(id, partial)
-    const job = jsonGetJob(id)
+    await fallback().updateJob(id, partial)
+    const job = await fallback().getJob(id)
     if (job) this._setAsync(job).catch(() => {})
   }
 
-  deleteJob(id: string): void {
+  async deleteJob(id: string): Promise<void> {
     if (this.fb) return this.fb.deleteJob(id)
-    jsonDeleteJob(id)
+    await fallback().deleteJob(id)
     if (this.ready) {
       this.client.del(KEY_PREFIX + id).catch(() => {})
       this.client.srem(INDEX_KEY, id).catch(() => {})
     }
   }
 
-  listJobs(): Job[] {
-    if (this.fb) return this.fb.listJobs()
-    return jsonListJobs()
+  async listJobs(userId?: string): Promise<Job[]> {
+    if (this.fb) return this.fb.listJobs(userId)
+    return fallback().listJobs(userId)
   }
 
-  cleanupOldJobs(): void {
+  async cleanupOldJobs(): Promise<void> {
     if (this.fb) return this.fb.cleanupOldJobs()
-    jsonCleanupOldJobs()
+    return fallback().cleanupOldJobs()
+  }
+
+  getLastDiskWrite(): Date {
+    return new Date()
   }
 
   private async _setAsync(job: Job): Promise<void> {

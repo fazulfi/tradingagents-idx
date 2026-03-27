@@ -1,17 +1,32 @@
 import { NextRequest } from "next/server"
+import { randomUUID } from "crypto"
 import { spawn } from "child_process"
 import path from "path"
 import { sanitizeTicker, sanitizeDate, detectVerdict } from "@/lib/utils"
-import {
-  createJob,
-  getJob,
-  updateJob,
-  listJobs,
-  MAX_JOBS,
-  type Sections,
-} from "@/lib/jobStore"
+import { MAX_JOBS, type Sections, type TokenUsage } from "@/lib/jobStoreInterface"
 import { prisma } from "@/lib/prisma"
 import { getAuthenticatedUserId } from "@/lib/authHelpers"
+
+function emptySections(): Sections {
+  return {
+    market_analyst: [],
+    fundamentals_analyst: [],
+    sentiment_analyst: [],
+    news_analyst: [],
+    bull_researcher: [],
+    bear_researcher: [],
+    research_decision: [],
+    trader_decision: [],
+    risk_aggressive: [],
+    risk_neutral: [],
+    risk_conservative: [],
+    final_decision: [],
+  }
+}
+
+function emptyTokenUsage(): TokenUsage {
+  return { input: 0, output: 0, total: 0, elapsed_ms: 0, byAgent: {} }
+}
 
 export async function POST(req: NextRequest) {
   const userId = await getAuthenticatedUserId(req)
@@ -34,20 +49,31 @@ export async function POST(req: NextRequest) {
   if (!ticker) return Response.json({ error: "Invalid ticker" }, { status: 400 })
   if (!date) return Response.json({ error: "Invalid date" }, { status: 400 })
 
-  const runningJobs = listJobs().filter(j => j.status === "running" || j.status === "pending")
-  if (runningJobs.length >= MAX_JOBS) {
+  // Check concurrent job limit via Prisma (per-user)
+  const activeCount = await prisma.job.count({
+    where: { userId, status: { in: ["running", "pending"] } },
+  })
+  if (activeCount >= MAX_JOBS) {
     return Response.json(
       { error: "Too many concurrent jobs. Please wait or cancel an existing job." },
       { status: 429 }
     )
   }
 
-  const job = createJob(ticker, date, model, debateRounds)
-  const jobId = job.id
-
-  // Persist job to SQLite with userId for per-user scoping
+  const jobId = randomUUID()
   await prisma.job.create({
-    data: { id: jobId, userId, ticker, date, model, status: "pending" },
+    data: {
+      id: jobId,
+      userId,
+      ticker,
+      date,
+      model,
+      debateRounds,
+      status: "pending",
+      sections: "{}",
+      logs: "[]",
+      tokenUsage: "{}",
+    },
   })
 
   const pythonPath = process.env.PYTHON_PATH ||
@@ -255,8 +281,8 @@ print("[COMPLETE]", flush=True)
     env: { ...process.env, PYTHONPATH: projectRoot },
   })
 
-  updateJob(jobId, { status: "running", pid: proc.pid })
-  prisma.job.update({ where: { id: jobId }, data: { status: "running" } }).catch(() => {})
+  // Update pid in Prisma (fire-and-forget)
+  prisma.job.update({ where: { id: jobId }, data: { status: "running", pid: proc.pid } }).catch(() => {})
 
   const MARKERS = [
     "MARKET_ANALYST", "FUNDAMENTALS_ANALYST", "SENTIMENT_ANALYST", "NEWS_ANALYST",
@@ -264,6 +290,26 @@ print("[COMPLETE]", flush=True)
     "RISK_AGGRESSIVE", "RISK_NEUTRAL", "RISK_CONSERVATIVE", "FINAL_DECISION",
     "STATUS", "COMPLETE", "ERROR", "TOKEN_USAGE", "TOKEN_TOTAL",
   ]
+
+  // Local job state for this streaming session — NOT a global Map.
+  // Lives only in this closure for the duration of this request.
+  const jobSections = emptySections()
+  const jobLogs: string[] = []
+  const jobTokenUsage = emptyTokenUsage()
+  let jobStatus: "pending" | "running" | "complete" | "error" | "cancelled" = "running"
+
+  function persistState(extra?: Record<string, unknown>) {
+    prisma.job.update({
+      where: { id: jobId },
+      data: {
+        status: jobStatus,
+        sections: JSON.stringify(jobSections),
+        logs: JSON.stringify(jobLogs),
+        tokenUsage: JSON.stringify(jobTokenUsage),
+        ...extra,
+      },
+    }).catch(() => {})
+  }
 
   let currentSection = ""
   let buffer = ""
@@ -274,39 +320,32 @@ print("[COMPLETE]", flush=True)
     for (const line of lines) {
       const found = MARKERS.find(m => line.includes("[" + m + "]"))
       if (found) {
-        const j = getJob(jobId)
-        if (!j) return
         if (found === "COMPLETE") {
-          j.status = "complete"
-          j.verdict = detectVerdict(j.sections.final_decision)
-          j.logs.push("[COMPLETE] Done")
-          j.updatedAt = Date.now()
-          // Persist to SQLite
-          prisma.job.update({ where: { id: jobId }, data: { status: "complete", result: JSON.stringify(j) } }).catch(() => {})
+          jobStatus = "complete"
+          const verdict = detectVerdict(jobSections.final_decision)
+          jobLogs.push("[COMPLETE] Done")
+          persistState({ verdict: verdict ?? null })
         } else if (found === "ERROR") {
           const msg = line.replace(/\[ERROR\]/g, "").trim()
-          j.status = "error"
-          j.error = msg
-          j.logs.push("[ERROR] " + msg)
-          j.updatedAt = Date.now()
-          // Persist to SQLite
-          prisma.job.update({ where: { id: jobId }, data: { status: "error", result: JSON.stringify(j) } }).catch(() => {})
+          jobStatus = "error"
+          jobLogs.push("[ERROR] " + msg)
+          persistState({ error: msg })
         } else if (found === "STATUS") {
           const msg = line.split("[STATUS]")[1]?.trim()
           if (msg) {
-            j.logs.push("[STATUS] " + msg)
-            j.updatedAt = Date.now()
+            jobLogs.push("[STATUS] " + msg)
+            persistState()
           }
         } else if (found === "TOKEN_USAGE") {
           const jsonStr = line.split("[TOKEN_USAGE]")[1]?.trim()
           if (jsonStr) {
             try {
               const u = JSON.parse(jsonStr) as { agent: string; input: number; output: number; total: number; elapsed_ms: number }
-              j.tokenUsage.input += u.input
-              j.tokenUsage.output += u.output
-              j.tokenUsage.total += u.total
-              j.tokenUsage.byAgent[u.agent] = { input: u.input, output: u.output, total: u.total, elapsed_ms: u.elapsed_ms }
-              j.updatedAt = Date.now()
+              jobTokenUsage.input += u.input
+              jobTokenUsage.output += u.output
+              jobTokenUsage.total += u.total
+              jobTokenUsage.byAgent[u.agent] = { input: u.input, output: u.output, total: u.total, elapsed_ms: u.elapsed_ms }
+              persistState()
             // eslint-disable-next-line @typescript-eslint/no-unused-vars
             } catch (_) {}
           }
@@ -315,28 +354,26 @@ print("[COMPLETE]", flush=True)
           if (jsonStr) {
             try {
               const t = JSON.parse(jsonStr) as { input: number; output: number; total: number; elapsed_ms: number }
-              Object.assign(j.tokenUsage, t)
-              j.updatedAt = Date.now()
+              Object.assign(jobTokenUsage, t)
+              persistState()
             // eslint-disable-next-line @typescript-eslint/no-unused-vars
             } catch (_) {}
           }
         } else {
           // Section marker
           currentSection = found
-          j.logs.push("[SECTION] " + found)
-          j.updatedAt = Date.now()
+          jobLogs.push("[SECTION] " + found)
+          persistState()
         }
       } else if (currentSection && line.trim()) {
-        const j = getJob(jobId)
-        if (!j) return
         const safeData = line
           .replace(/\/home\/[^\s]+/g, "[path]")
           .replace(/sk-[a-zA-Z0-9]+/g, "[key]")
           .slice(0, 4000)
         const key = currentSection.toLowerCase() as keyof Sections
-        if (key in j.sections) {
-          j.sections[key].push(safeData)
-          j.updatedAt = Date.now()
+        if (key in jobSections) {
+          jobSections[key].push(safeData)
+          persistState()
         }
       }
     }
@@ -345,22 +382,18 @@ print("[COMPLETE]", flush=True)
   proc.stderr.on("data", (chunk: Buffer) => {
     const msg = chunk.toString()
     if (msg.toLowerCase().includes("error") || msg.toLowerCase().includes("traceback")) {
-      const j = getJob(jobId)
-      if (j && j.status === "running") {
-        j.logs.push("[ERROR] " + msg.split("\n")[0].slice(0, 300))
-        j.updatedAt = Date.now()
+      if (jobStatus === "running") {
+        jobLogs.push("[ERROR] " + msg.split("\n")[0].slice(0, 300))
+        persistState()
       }
     }
   })
 
   proc.on("close", (code: number) => {
-    const j = getJob(jobId)
-    if (j && j.status === "running") {
-      j.status = "error"
-      j.error = code !== 0 ? `Process exited with code ${code}` : "Process ended unexpectedly"
-      j.updatedAt = Date.now()
-      // Persist to SQLite
-      prisma.job.update({ where: { id: jobId }, data: { status: "error", result: JSON.stringify(j) } }).catch(() => {})
+    if (jobStatus === "running") {
+      jobStatus = "error"
+      const errMsg = code !== 0 ? `Process exited with code ${code}` : "Process ended unexpectedly"
+      persistState({ error: errMsg })
     }
   })
 
