@@ -49,7 +49,7 @@ export default function VerdictCard({ decision, isActive = false }: Props) {
 
   return (
     <div
-      className="glass-panel rounded-xl p-6 panel-fade-in mt-6"
+      className={`glass-panel rounded-xl p-6 panel-fade-in mt-4${isActive && decision.length === 0 ? " verdict-awaiting" : ""}`}
       style={{ borderColor: color + "40", boxShadow: "0 0 50px " + color + "12" }}
     >
       <div className="flex items-center justify-between mb-4">

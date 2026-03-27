@@ -4,6 +4,8 @@ import { useState, useEffect, useRef, useCallback } from "react"
 import AgentPanel from "@/components/AgentPanel"
 import VerdictCard from "@/components/VerdictCard"
 import WatchlistPanel from "@/components/WatchlistPanel"
+import TickerInput from "@/components/TickerInput"
+import { useMediaQuery } from "@/lib/hooks"
 
 type Sections = {
   market_analyst: string[]
@@ -114,6 +116,9 @@ export default function Home() {
   const [showResume, setShowResume] = useState(false)
   const [copied, setCopied] = useState(false)
   const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const [logCollapsed, setLogCollapsed] = useState(true)
+  const [logSheetOpen, setLogSheetOpen] = useState(false)
+  const isMobile = useMediaQuery("(max-width: 768px)")
 
   const fallbackCopy = (text: string) => {
     const el = document.createElement("textarea")
@@ -232,9 +237,9 @@ export default function Home() {
       if (!res.ok) return
       const job = await res.json()
 
-      setSections(job.sections)
+      setSections({ ...empty, ...job.sections })
       setLogs(job.logs)
-      setTokenUsage(job.tokenUsage)
+      setTokenUsage({ ...emptyTokenUsage, ...job.tokenUsage, byAgent: job.tokenUsage?.byAgent ?? {} })
 
       // Detect active section from last SECTION log entry
       const lastSectionLog = [...(job.logs as string[])].reverse().find((l: string) => l.startsWith("[SECTION]"))
@@ -257,7 +262,7 @@ export default function Home() {
         setStatus("Analysis complete")
         const pricing = modelPricingRef.current
         const cost = pricing
-          ? job.tokenUsage.input * pricing.prompt + job.tokenUsage.output * pricing.completion
+          ? (job.tokenUsage?.input ?? 0) * pricing.prompt + (job.tokenUsage?.output ?? 0) * pricing.completion
           : 0
         const run: SessionRun = {
           ticker: job.ticker,
@@ -358,9 +363,9 @@ export default function Home() {
       const job = await res.json()
 
       setJobId(id.trim())
-      setSections(job.sections)
+      setSections({ ...empty, ...job.sections })
       setLogs(job.logs)
-      setTokenUsage(job.tokenUsage)
+      setTokenUsage({ ...emptyTokenUsage, ...job.tokenUsage, byAgent: job.tokenUsage?.byAgent ?? {} })
       setStatus(job.status === "complete" ? "Analysis complete" : job.status === "error" ? "Error: " + job.error : job.status)
 
       if (job.status === "running") {
@@ -426,37 +431,37 @@ export default function Home() {
 
   // Cost calculation
   const cost = modelPricing
-    ? (tokenUsage.input * modelPricing.prompt) + (tokenUsage.output * modelPricing.completion)
+    ? ((tokenUsage?.input ?? 0) * modelPricing.prompt) + ((tokenUsage?.output ?? 0) * modelPricing.completion)
     : null
   const costStr = cost != null && cost > 0 ? "~$" + cost.toFixed(4) : ""
 
   // Token breakdown helpers
-  const agentEntries = Object.entries(tokenUsage.byAgent)
+  const agentEntries = Object.entries(tokenUsage?.byAgent ?? {})
   const maxAgent = agentEntries.length > 0
     ? agentEntries.reduce((a, b) => b[1].total > a[1].total ? b : a)[0]
     : ""
 
   const hasAnyAnalyst =
-    sections.market_analyst.length > 0 ||
-    sections.fundamentals_analyst.length > 0 ||
-    sections.sentiment_analyst.length > 0 ||
-    sections.news_analyst.length > 0 ||
+    (sections.market_analyst?.length ?? 0) > 0 ||
+    (sections.fundamentals_analyst?.length ?? 0) > 0 ||
+    (sections.sentiment_analyst?.length ?? 0) > 0 ||
+    (sections.news_analyst?.length ?? 0) > 0 ||
     active === "market_analyst" || active === "fundamentals_analyst" ||
     active === "sentiment_analyst" || active === "news_analyst"
 
   const hasAnyDebate =
-    sections.bull_researcher.length > 0 ||
-    sections.bear_researcher.length > 0 ||
-    sections.research_decision.length > 0 ||
+    (sections.bull_researcher?.length ?? 0) > 0 ||
+    (sections.bear_researcher?.length ?? 0) > 0 ||
+    (sections.research_decision?.length ?? 0) > 0 ||
     active === "bull_researcher" || active === "bear_researcher" || active === "research_decision"
 
   const hasTrader =
-    sections.trader_decision.length > 0 || active === "trader_decision"
+    (sections.trader_decision?.length ?? 0) > 0 || active === "trader_decision"
 
   const hasAnyRisk =
-    sections.risk_aggressive.length > 0 ||
-    sections.risk_neutral.length > 0 ||
-    sections.risk_conservative.length > 0 ||
+    (sections.risk_aggressive?.length ?? 0) > 0 ||
+    (sections.risk_neutral?.length ?? 0) > 0 ||
+    (sections.risk_conservative?.length ?? 0) > 0 ||
     active === "risk_aggressive" || active === "risk_neutral" || active === "risk_conservative"
 
   // Cost/time estimator
@@ -512,18 +517,12 @@ export default function Home() {
         </div>
       </div>
 
-      <div className="max-w-7xl mx-auto px-6 py-4">
+      <div className={`max-w-7xl mx-auto px-6 py-4${isMobile && logs.length > 0 ? " pb-14" : ""}`}>
         {/* Controls */}
         <div className="glass-panel rounded-lg p-4 flex flex-wrap gap-4 items-end">
           <div>
             <label className="text-xs text-zinc-500 uppercase tracking-wider block mb-1">Ticker</label>
-            <input
-              value={ticker}
-              onChange={e => setTicker(e.target.value.toUpperCase())}
-              maxLength={12}
-              placeholder="NVDA, BBCA.JK"
-              className="bg-zinc-900 border border-zinc-700 rounded px-3 py-2 text-sm font-mono text-zinc-100 w-36 focus:outline-none focus:border-zinc-500"
-            />
+            <TickerInput value={ticker} onChange={setTicker} />
             <p className="text-xs text-zinc-600 mt-1">US: NVDA &middot; ID: BBCA.JK &middot; JP: 7203.T &middot; HK: 0700.HK</p>
           </div>
 
@@ -686,31 +685,86 @@ export default function Home() {
           )}
         </div>
 
+        {/* Verdict Card — shown at top as soon as analysis starts */}
+        {(running || sections.final_decision.length > 0) && (
+          <VerdictCard
+            decision={sections.final_decision}
+            isActive={active === "final_decision" || (running && sections.final_decision.length === 0)}
+          />
+        )}
+
         {/* Watchlist */}
         <WatchlistPanel setTicker={setTicker} handleRun={handleRun} />
 
-        {/* Live Log */}
-        {logs.length > 0 && (
-          <div className="mt-4 glass-panel rounded-lg p-4">
-            <p className="text-xs text-zinc-500 uppercase tracking-widest mb-2">Live Log</p>
-            <div className="text-xs font-mono space-y-0.5 max-h-36 overflow-y-auto scrollbar-thin">
-              {logs.map((log, i) => (
-                <p
-                  key={i}
-                  className={
+        {/* Live Log — desktop: collapsible inline; mobile: sticky bottom bar + sheet */}
+        {!isMobile && logs.length > 0 && (
+          <div className="mt-4 glass-panel rounded-lg overflow-hidden">
+            <button
+              onClick={() => setLogCollapsed(b => !b)}
+              className="w-full px-4 py-2.5 text-left flex justify-between items-center hover:bg-zinc-800/30 transition-colors"
+            >
+              <span className="text-xs text-zinc-500 uppercase tracking-widest font-mono">
+                ⚡ LIVE LOG ({logs.length} entries)
+              </span>
+              <span className="text-xs text-zinc-600">{logCollapsed ? "▼" : "▲"}</span>
+            </button>
+            {!logCollapsed && (
+              <div className="px-4 pb-3 text-xs font-mono space-y-0.5 max-h-48 overflow-y-auto scrollbar-thin">
+                {logs.map((log, i) => (
+                  <p key={i} className={
                     log.startsWith("[ERROR]")    ? "text-red-400"    :
                     log.startsWith("[COMPLETE]") ? "text-green-400"  :
                     log.startsWith("[SECTION]")  ? "text-yellow-400" :
                     log.startsWith("[STATUS]")   ? "text-zinc-400"   :
                     "text-zinc-600"
-                  }
-                >
-                  {log}
-                </p>
-              ))}
-              <div ref={logBottomRef} />
-            </div>
+                  }>{log}</p>
+                ))}
+                <div ref={logBottomRef} />
+              </div>
+            )}
           </div>
+        )}
+
+        {/* Mobile live log: sticky bottom bar */}
+        {isMobile && logs.length > 0 && (
+          <>
+            <div
+              className="fixed bottom-0 left-0 right-0 z-50 bg-zinc-950/95 backdrop-blur-md border-t border-zinc-800 px-4 py-2 flex items-center gap-2 cursor-pointer"
+              onClick={() => setLogSheetOpen(true)}
+            >
+              <span className="text-yellow-400 text-xs font-mono shrink-0">⚡ {logs.length} logs</span>
+              <span className="text-zinc-600 text-xs font-mono">·</span>
+              <span className="text-zinc-500 text-xs font-mono truncate flex-1">
+                {logs[logs.length - 1]?.slice(0, 40)}
+              </span>
+              <span className="text-zinc-600 text-xs font-mono shrink-0">▲</span>
+            </div>
+            {logSheetOpen && (
+              <div className="fixed inset-0 z-50" onClick={() => setLogSheetOpen(false)}>
+                <div
+                  className="absolute bottom-0 left-0 right-0 h-[60vh] bg-zinc-950/95 backdrop-blur-md border-t border-zinc-800 rounded-t-xl overflow-hidden"
+                  onClick={e => e.stopPropagation()}
+                >
+                  <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800">
+                    <span className="text-xs font-mono text-zinc-400 uppercase tracking-widest">Live Log</span>
+                    <button onClick={() => setLogSheetOpen(false)} className="text-zinc-400 text-xl leading-none">×</button>
+                  </div>
+                  <div className="overflow-y-auto h-full px-4 py-2 text-xs font-mono space-y-0.5 pb-12 scrollbar-thin">
+                    {logs.map((log, i) => (
+                      <p key={i} className={
+                        log.startsWith("[ERROR]")    ? "text-red-400"    :
+                        log.startsWith("[COMPLETE]") ? "text-green-400"  :
+                        log.startsWith("[SECTION]")  ? "text-yellow-400" :
+                        log.startsWith("[STATUS]")   ? "text-zinc-400"   :
+                        "text-zinc-600"
+                      }>{log}</p>
+                    ))}
+                    <div ref={logBottomRef} />
+                  </div>
+                </div>
+              </div>
+            )}
+          </>
         )}
 
         {/* Token Breakdown Panel */}
@@ -906,7 +960,7 @@ export default function Home() {
                 isActive={active === "bull_researcher"}
               />
             </div>
-            {(sections.research_decision.length > 0 || active === "research_decision") && (
+            {((sections.research_decision?.length ?? 0) > 0 || active === "research_decision") && (
               <AgentPanel
                 title="Research Manager Decision"
                 icon="🧠"
@@ -962,11 +1016,8 @@ export default function Home() {
           </div>
         )}
 
-        {/* Final Verdict */}
-        <VerdictCard decision={sections.final_decision} isActive={active === "final_decision"} />
-
         {/* Export Button */}
-        {sections.final_decision.length > 0 && !running && (
+        {(sections.final_decision?.length ?? 0) > 0 && !running && (
           <div className="mt-4 flex justify-end">
             <button
               onClick={handleExport}

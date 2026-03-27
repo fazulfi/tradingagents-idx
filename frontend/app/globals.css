@@ -35,3 +35,16 @@ body {
 .scrollbar-thin::-webkit-scrollbar { width:4px; }
 .scrollbar-thin::-webkit-scrollbar-track { background:transparent; }
 .scrollbar-thin::-webkit-scrollbar-thumb { background:#3f3f46; border-radius:2px; }
+
+/* Agent panel prose — readable sans-serif for markdown content */
+.agent-prose { font-family: system-ui, sans-serif; font-size: 0.75rem; }
+.agent-prose code, .agent-prose pre { font-family: "JetBrains Mono", monospace; }
+
+/* Verdict card pulsing border while awaiting */
+@keyframes verdictPulse {
+  0%, 100% { border-color: rgba(234,179,8,0.15); }
+  50%       { border-color: rgba(234,179,8,0.45); }
+}
+.verdict-awaiting {
+  animation: verdictPulse 2s ease-in-out infinite;
+}
