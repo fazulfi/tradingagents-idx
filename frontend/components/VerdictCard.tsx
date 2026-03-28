@@ -1,4 +1,5 @@
 "use client"
+import ReactMarkdown from "react-markdown"
 
 interface Props {
   decision: string[]
@@ -86,10 +87,12 @@ export default function VerdictCard({ decision, isActive = false }: Props) {
       </div>
 
       {decision.length > 0 && (
-        <div className="text-xs text-zinc-300 leading-relaxed space-y-1 max-h-56 overflow-y-auto scrollbar-thin">
-          {decision.map((line, i) => (
-            <p key={i} className="font-mono">{line}</p>
-          ))}
+        <div className="text-xs text-zinc-300 leading-relaxed max-h-56 overflow-y-auto scrollbar-thin">
+          <div className="prose prose-invert prose-sm max-w-none overflow-x-auto break-words
+            prose-headings:text-zinc-200 prose-strong:text-zinc-100
+            prose-table:text-xs prose-td:p-1 prose-th:p-1 agent-prose">
+            <ReactMarkdown>{decision.join("\n")}</ReactMarkdown>
+          </div>
         </div>
       )}
     </div>

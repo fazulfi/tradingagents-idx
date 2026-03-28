@@ -298,17 +298,23 @@ print("[COMPLETE]", flush=True)
   const jobTokenUsage = emptyTokenUsage()
   let jobStatus: "pending" | "running" | "complete" | "error" | "cancelled" = "running"
 
+  let pendingWrite: Promise<unknown> = Promise.resolve()
+
   function persistState(extra?: Record<string, unknown>) {
-    prisma.job.update({
-      where: { id: jobId },
-      data: {
-        status: jobStatus,
-        sections: JSON.stringify(jobSections),
-        logs: JSON.stringify(jobLogs),
-        tokenUsage: JSON.stringify(jobTokenUsage),
-        ...extra,
-      },
-    }).catch(() => {})
+    pendingWrite = pendingWrite.then(() =>
+      prisma.job.update({
+        where: { id: jobId },
+        data: {
+          status: jobStatus,
+          sections: JSON.stringify(jobSections),
+          logs: JSON.stringify(jobLogs),
+          tokenUsage: JSON.stringify(jobTokenUsage),
+          ...extra,
+        },
+      })
+    ).catch((e: unknown) => {
+      console.error("[persistState] DB write failed:", e)
+    })
   }
 
   let currentSection = ""
@@ -389,11 +395,13 @@ print("[COMPLETE]", flush=True)
     }
   })
 
-  proc.on("close", (code: number) => {
+  proc.on("close", async (code: number) => {
+    await pendingWrite
     if (jobStatus === "running") {
       jobStatus = "error"
       const errMsg = code !== 0 ? `Process exited with code ${code}` : "Process ended unexpectedly"
       persistState({ error: errMsg })
+      await pendingWrite
     }
   })
 

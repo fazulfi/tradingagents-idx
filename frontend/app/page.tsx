@@ -286,6 +286,7 @@ export default function Home() {
       } else if (job.status === "error") {
         if (pollIntervalRef.current) clearInterval(pollIntervalRef.current)
         setRunning(false)
+        setActive("")
         setStatus("Error: " + (job.error || "Unknown error"))
         if ("Notification" in window && Notification.permission === "granted") {
           new Notification("AI Trading War Room", {
@@ -296,6 +297,7 @@ export default function Home() {
       } else if (job.status === "cancelled") {
         if (pollIntervalRef.current) clearInterval(pollIntervalRef.current)
         setRunning(false)
+        setActive("")
         setStatus("Cancelled")
       }
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -320,6 +322,7 @@ export default function Home() {
 
   const handleRun = async () => {
     if (running) return
+    if (pollIntervalRef.current) clearInterval(pollIntervalRef.current)
     const startTime = Date.now()
     analysisStartTimeRef.current = startTime
     setSections(empty)
@@ -362,6 +365,8 @@ export default function Home() {
       if (!res.ok) { setStatus("Job not found"); return }
       const job = await res.json()
 
+      if (pollIntervalRef.current) clearInterval(pollIntervalRef.current)
+
       setJobId(id.trim())
       setSections({ ...empty, ...job.sections })
       setLogs(job.logs)
@@ -371,8 +376,10 @@ export default function Home() {
       if (job.status === "running") {
         setRunning(true)
         analysisStartTimeRef.current = job.createdAt
-        if (pollIntervalRef.current) clearInterval(pollIntervalRef.current)
         pollIntervalRef.current = setInterval(() => pollJob(id.trim()), 2000)
+      } else {
+        setRunning(false)
+        setActive("")
       }
 
       setShowResume(false)
