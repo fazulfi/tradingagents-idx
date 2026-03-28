@@ -7,17 +7,21 @@ interface Props {
 }
 
 type Rating = {
+  bg: string
+  border: string
   color: string
   label: string
   emoji: string
 }
 
 const RATINGS: Record<string, Rating> = {
-  SELL:        { color: "#ef4444", label: "SELL",        emoji: "🔴" },
-  UNDERWEIGHT: { color: "#fb923c", label: "UNDERWEIGHT", emoji: "🟠" },
-  HOLD:        { color: "#eab308", label: "HOLD",        emoji: "🟡" },
-  OVERWEIGHT:  { color: "#86efac", label: "OVERWEIGHT",  emoji: "🟢" },
-  BUY:         { color: "#22c55e", label: "BUY",         emoji: "🟢" },
+  SELL:         { bg: "rgba(239,68,68,0.08)",   border: "rgba(239,68,68,0.45)",   color: "#ef4444", label: "SELL",         emoji: "🔴" },
+  "STRONG SELL":{ bg: "rgba(239,68,68,0.12)",   border: "rgba(239,68,68,0.55)",   color: "#f87171", label: "STRONG SELL",  emoji: "🔴" },
+  UNDERWEIGHT:  { bg: "rgba(249,115,22,0.08)",  border: "rgba(249,115,22,0.45)",  color: "#fb923c", label: "UNDERWEIGHT",  emoji: "🟠" },
+  HOLD:         { bg: "rgba(234,179,8,0.08)",   border: "rgba(234,179,8,0.45)",   color: "#eab308", label: "HOLD",         emoji: "🟡" },
+  OVERWEIGHT:   { bg: "rgba(6,182,212,0.08)",   border: "rgba(6,182,212,0.45)",   color: "#22d3ee", label: "OVERWEIGHT",   emoji: "🟢" },
+  BUY:          { bg: "rgba(34,197,94,0.08)",   border: "rgba(34,197,94,0.45)",   color: "#22c55e", label: "BUY",          emoji: "🟢" },
+  "STRONG BUY": { bg: "rgba(34,197,94,0.12)",   border: "rgba(34,197,94,0.55)",   color: "#4ade80", label: "STRONG BUY",   emoji: "🟢" },
 }
 
 function detectRating(text: string): Rating {
@@ -30,12 +34,12 @@ function detectRating(text: string): Rating {
   ]
   for (const re of patterns) {
     const m = text.match(re)
-    if (m) return RATINGS[m[1].toUpperCase()]
+    if (m) return RATINGS[m[1].toUpperCase()] ?? RATINGS["HOLD"]
   }
 
   // Fallback: keyword scan — most bearish first to avoid false positives
   const upper = text.toUpperCase()
-  for (const key of ["SELL", "UNDERWEIGHT", "HOLD", "OVERWEIGHT", "BUY"]) {
+  for (const key of ["STRONG SELL", "SELL", "UNDERWEIGHT", "HOLD", "OVERWEIGHT", "STRONG BUY", "BUY"]) {
     if (upper.includes(key)) return RATINGS[key]
   }
   return RATINGS["HOLD"]
@@ -46,12 +50,16 @@ export default function VerdictCard({ decision, isActive = false }: Props) {
 
   const fullText = decision.join(" ")
   const rating = detectRating(fullText)
-  const { color, label, emoji } = rating
+  const { bg, border, color, label, emoji } = rating
 
   return (
     <div
-      className={`glass-panel rounded-xl p-6 panel-fade-in mt-4${isActive && decision.length === 0 ? " verdict-awaiting" : ""}`}
-      style={{ borderColor: color + "40", boxShadow: "0 0 50px " + color + "12" }}
+      className={`rounded-xl p-6 panel-fade-in mt-4${isActive && decision.length === 0 ? " verdict-awaiting" : ""}`}
+      style={{
+        background: bg,
+        border: `1px solid ${border}`,
+        boxShadow: decision.length > 0 ? `0 0 40px ${color}10` : undefined,
+      }}
     >
       <div className="flex items-center justify-between mb-4">
         <div>
@@ -66,7 +74,7 @@ export default function VerdictCard({ decision, isActive = false }: Props) {
           <div className="flex items-center gap-3">
             <span className="text-2xl">{emoji}</span>
             <span
-              className="text-3xl font-black tracking-wider"
+              className="text-3xl font-black tracking-wider verdict-shimmer rounded px-2 py-0.5"
               style={{ color }}
             >
               {label}

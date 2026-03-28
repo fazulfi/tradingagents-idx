@@ -48,7 +48,15 @@ export default function AgentPanel({ title, icon, content, accentColor, glowClas
       : <span className="text-zinc-500">⭕</span>
 
   return (
-    <div className={`glass-panel rounded-lg panel-fade-in ${glowClass}`}>
+    <div
+      className={`glass-panel rounded-lg panel-fade-in ${glowClass}`}
+      style={{
+        borderLeft: `4px solid ${accentColor}`,
+        boxShadow: isActive
+          ? `0 0 20px ${accentColor}18, inset 0 0 0 1px ${accentColor}12`
+          : undefined,
+      }}
+    >
       <button
         onClick={() => setIsCollapsed(b => !b)}
         className="w-full flex items-center gap-2 px-4 py-3 text-left"
@@ -57,7 +65,7 @@ export default function AgentPanel({ title, icon, content, accentColor, glowClas
         <span className="text-xs font-bold tracking-widest uppercase" style={{ color: accentColor }}>{title}</span>
         <span className="ml-1 text-xs">{statusIcon}</span>
         {isActive && (
-          <span className="flex gap-1 ml-1">
+          <span className={`flex gap-1 ml-1 ${isActive ? "agent-active-border" : ""}`}>
             {[0, 100, 200].map(d => (
               <span key={d} className="w-1.5 h-1.5 rounded-full animate-bounce"
                 style={{ backgroundColor: accentColor, animationDelay: `${d}ms` }} />

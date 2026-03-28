@@ -67,7 +67,7 @@ export default function WatchlistPanel({ setTicker, handleRun }: Props) {
   }
 
   return (
-    <div className="border border-zinc-800 rounded-lg bg-zinc-900/40 p-4 mb-4">
+    <div className="border border-zinc-800/60 rounded-lg bg-zinc-900/40 p-4">
       <div className="flex items-center gap-2 mb-3">
         <span className="text-green-500 text-xs">■</span>
         <span className="text-xs font-mono text-zinc-400 tracking-widest uppercase">Watchlist</span>

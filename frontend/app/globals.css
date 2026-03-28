@@ -48,3 +48,23 @@ body {
 .verdict-awaiting {
   animation: verdictPulse 2s ease-in-out infinite;
 }
+
+/* Shimmer sweep on verdict badge */
+@keyframes shimmer {
+  0%   { background-position: -200% center; }
+  100% { background-position:  200% center; }
+}
+.verdict-shimmer {
+  background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.07) 50%, transparent 100%);
+  background-size: 200% 100%;
+  animation: shimmer 2.5s ease-in-out infinite;
+}
+
+/* Active agent left-border pulse */
+@keyframes borderPulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.4; }
+}
+.agent-active-border {
+  animation: borderPulse 1.5s ease-in-out infinite;
+}
