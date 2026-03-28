@@ -40,6 +40,7 @@ type SessionRun = {
   verdict: string
   timestamp: string
   elapsedSeconds: number
+  jobId?: string
 }
 type ORModel = { id: string; name: string; pricing?: { prompt: string; completion: string } }
 
@@ -97,11 +98,12 @@ function verdictEmoji(v: string): string {
 }
 
 const LOG_COLOR: Record<string, string> = {
-  "[ERROR]":       "text-rose-400",
-  "[COMPLETE]":    "text-emerald-300 font-bold",
-  "[SECTION]":     "text-emerald-400",
-  "[STATUS]":      "text-zinc-400",
-  "[TOKEN_USAGE]": "text-amber-400",
+  "[ERROR]":        "text-rose-400",
+  "[COMPLETE]":     "text-emerald-300 font-bold",
+  "[SECTION]":      "text-emerald-400",
+  "[STATUS]":       "text-zinc-500",
+  "[TOKEN_USAGE]":  "text-amber-400",
+  "[TOKEN_TOTAL]":  "text-amber-300",
 }
 function logClass(log: string): string {
   for (const [prefix, cls] of Object.entries(LOG_COLOR)) {
@@ -133,6 +135,18 @@ export default function Home() {
   const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const [logSheetOpen, setLogSheetOpen] = useState(false)
   const isMobile = useMediaQuery("(max-width: 768px)")
+  const [leftOpen, setLeftOpen] = useState(true)
+  const [rightOpen, setRightOpen] = useState(true)
+
+  // Init sidebar state from localStorage (collapse on mobile)
+  useEffect(() => {
+    const mobile = window.innerWidth < 768
+    setLeftOpen(mobile ? false : localStorage.getItem("sidebar-left-open") !== "false")
+    setRightOpen(mobile ? false : localStorage.getItem("sidebar-right-open") !== "false")
+  }, [])
+
+  useEffect(() => { localStorage.setItem("sidebar-left-open", String(leftOpen)) }, [leftOpen])
+  useEffect(() => { localStorage.setItem("sidebar-right-open", String(rightOpen)) }, [rightOpen])
 
   // WIB clock
   const [wibClock, setWibClock] = useState("")
@@ -297,6 +311,7 @@ export default function Home() {
           date: job.date,
           model: job.model,
           tokens: job.tokenUsage,
+          jobId: id,
           cost,
           verdict: job.verdict || detectVerdict(job.sections.final_decision),
           timestamp: new Date().toLocaleTimeString(),
@@ -330,6 +345,7 @@ export default function Home() {
       }
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     } catch (_) {}
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const handleCancel = async () => {
@@ -464,12 +480,6 @@ export default function Home() {
     URL.revokeObjectURL(url)
   }
 
-  // Cost calculation
-  const cost = modelPricing
-    ? ((tokenUsage?.input ?? 0) * modelPricing.prompt) + ((tokenUsage?.output ?? 0) * modelPricing.completion)
-    : null
-  const costStr = cost != null && cost > 0 ? "~$" + cost.toFixed(4) : ""
-
   // Token breakdown helpers
   const agentEntries = Object.entries(tokenUsage?.byAgent ?? {})
   const maxAgent = agentEntries.length > 0
@@ -527,144 +537,82 @@ export default function Home() {
   return (
     <div className="dot-grid bg-[#09090b]" style={{ backgroundAttachment: "fixed" }}>
 
-      {/* ── FIXED HEADER (48px) ─────────────────────────────────── */}
-      <header className="fixed top-0 left-0 right-0 h-12 z-50 flex items-center px-4 gap-3
+      {/* ── FIXED HEADER (44px) ─────────────────────────────────── */}
+      <header className="fixed top-0 left-0 right-0 h-11 z-50 flex items-center px-3 gap-2
         border-b border-white/[0.06] bg-[#09090b]/80 backdrop-blur-xl">
 
+        {/* Left hamburger */}
+        <HamburgerButton onClick={() => setLeftOpen(v => !v)} />
+
         {/* Logo */}
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex items-center gap-1.5 shrink-0">
           <span className="text-emerald-500 text-base leading-none">⬡</span>
           <span className="text-xs font-bold tracking-widest text-zinc-100 hidden sm:block font-mono">
             TRADING WAR ROOM
           </span>
         </div>
 
-        {/* Center: active ticker */}
+        {/* Center: ticker live indicator */}
         <div className="flex-1 flex justify-center">
           {running ? (
             <span className="text-xs font-mono text-emerald-400 animate-pulse tracking-widest">
               ⟳ {ticker}
             </span>
-          ) : sections.final_decision.length > 0 ? (
-            <span className="text-xs font-mono text-zinc-500 tracking-widest">{ticker}</span>
-          ) : null}
+          ) : (
+            <span className="text-[11px] font-mono text-zinc-700 tracking-widest">⬡ READY ⬡</span>
+          )}
         </div>
 
         {/* Right cluster */}
         <div className="flex items-center gap-2 shrink-0 text-xs font-mono">
-          {/* Token HUD */}
-          {(running || tokenUsage.total > 0) && (
-            <div className="hidden md:flex items-center gap-1.5 text-[11px]">
-              <span className="text-zinc-600">⏱ {fmtTime(elapsedSeconds)}</span>
-              <span className="text-zinc-800">|</span>
-              <span className="text-blue-400">IN:{fmtNum(tokenUsage.input)}</span>
-              <span className="text-emerald-400">OUT:{fmtNum(tokenUsage.output)}</span>
-              {costStr && <span className="text-amber-400">{costStr}</span>}
-              {tokenUsage.total > 100000 && <span className="text-rose-400 animate-pulse">⚠</span>}
-              {tokenUsage.total > 50000 && tokenUsage.total <= 100000 && <span className="text-amber-400">⚠</span>}
-            </div>
-          )}
-          {/* IDX badge */}
+          {/* IDX badge — emerald */}
           {idxUsage?.available && (
             <span className={`text-[11px] hidden sm:block ${
               idxUsage.used > 950 ? "text-rose-400" :
-              idxUsage.used > 800 ? "text-amber-400" : "text-blue-400"
+              idxUsage.used > 800 ? "text-amber-400" : "text-emerald-500"
             }`}>IDX:{idxUsage.used}/{idxUsage.limit}</span>
           )}
-          {/* Running pulse */}
-          {running && <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shrink-0" />}
+          {/* Model name badge — amber */}
+          <span className="text-amber-500/70 text-[11px] hidden md:block truncate max-w-[120px]">
+            {model.split("/").pop()}
+          </span>
           {/* WIB clock */}
           {wibClock && (
             <span className="text-zinc-700 hidden lg:block text-[11px]">{wibClock} WIB</span>
           )}
-          {/* Tablet log toggle (visible md→lg only) */}
-          {logs.length > 0 && (
-            <button
-              className="flex md:flex lg:hidden items-center gap-1 px-2 py-1 rounded
-                border border-zinc-800 text-zinc-500 hover:text-zinc-300 transition text-[11px]"
-              onClick={() => setLogSheetOpen(true)}
-            >
-              ⚡ LOG
-            </button>
-          )}
           <UserMenu />
+          {/* Right hamburger */}
+          <HamburgerButton onClick={() => setRightOpen(v => !v)} />
         </div>
       </header>
 
       {/* ── THREE-COLUMN BODY ────────────────────────────────────── */}
-      <div className="flex h-screen pt-12">
+      <div className="flex h-screen flex-col pt-[44px]">
+      <div className="flex flex-1 overflow-hidden">
 
-        {/* LEFT SIDEBAR — hidden on mobile */}
-        <aside className="hidden md:flex flex-col w-56 lg:w-64 shrink-0
-          border-r border-zinc-800/60 overflow-y-auto scrollbar-thin bg-zinc-950/40">
-          <div className="p-4 space-y-4">
+        {/* LEFT SIDEBAR — animated toggle */}
+        <div className={`transition-all duration-300 ${leftOpen ? "w-[220px]" : "w-0"} overflow-hidden flex-shrink-0 border-r border-white/5`}>
+        <aside className="w-[220px] h-full flex flex-col overflow-y-auto scrollbar-thin bg-zinc-950/40">
+          <div className="p-3 space-y-3">
             <WatchlistPanel setTicker={setTicker} handleRun={handleRun} />
 
-            {/* Session History */}
+            {/* RECENT sessions */}
             {sessionHistory.length > 0 && (
-              <div className="border border-zinc-800/60 rounded-lg bg-zinc-900/40 overflow-hidden">
-                <button
-                  onClick={() => setShowSessionHistory(b => !b)}
-                  className="w-full px-4 py-2.5 flex items-center justify-between
-                    hover:bg-zinc-800/30 transition-colors"
-                >
-                  <span className="text-xs font-mono text-zinc-400 uppercase tracking-widest">
-                    History ({sessionHistory.length})
-                  </span>
-                  <span className="text-xs text-zinc-600">{showSessionHistory ? "▲" : "▼"}</span>
-                </button>
-                {showSessionHistory && (
-                  <div className="px-3 pb-3 space-y-1">
-                    {sessionHistory.map((run, i) => {
-                      const modelShort = run.model.split("/").pop() ?? run.model
-                      const isExpanded = expandedHistoryRow === i
-                      return (
-                        <div key={i}>
-                          <button
-                            onClick={() => setExpandedHistoryRow(isExpanded ? null : i)}
-                            className="w-full text-left px-2 py-1.5 rounded font-mono text-[11px]
-                              flex flex-col gap-0.5 hover:bg-zinc-800/40 transition-colors"
-                          >
-                            <div className="flex items-center gap-1.5 flex-wrap">
-                              <span className="text-zinc-200 font-bold">{run.ticker}</span>
-                              <span>{verdictEmoji(run.verdict)}</span>
-                              <span className="text-zinc-300">{run.verdict}</span>
-                            </div>
-                            <div className="flex items-center gap-1.5 flex-wrap text-zinc-600">
-                              <span className="truncate max-w-[100px]">{modelShort}</span>
-                              <span>·</span>
-                              <span>{fmtTime(run.elapsedSeconds)}</span>
-                              {run.cost > 0 && (
-                                <>
-                                  <span>·</span>
-                                  <span className="text-amber-600">~${run.cost.toFixed(4)}</span>
-                                </>
-                              )}
-                            </div>
-                          </button>
-                          {isExpanded && (
-                            <div className="mx-2 mb-1 px-2 py-1.5 rounded bg-zinc-900/60
-                              text-[11px] font-mono text-zinc-500 whitespace-pre-wrap
-                              max-h-28 overflow-y-auto scrollbar-thin">
-                              {run.tokens.byAgent && Object.keys(run.tokens.byAgent).length > 0 ? (
-                                Object.entries(run.tokens.byAgent).map(([agent, u]) => (
-                                  <div key={agent} className="flex gap-3">
-                                    <span className="text-zinc-600 w-28 truncate">{agent.replace(/_/g, " ")}</span>
-                                    <span className="text-blue-500/60">in:{fmtNum(u.input)}</span>
-                                    <span className="text-emerald-500/60">out:{fmtNum(u.output)}</span>
-                                    <span className="text-zinc-600">{(u.elapsed_ms / 1000).toFixed(1)}s</span>
-                                  </div>
-                                ))
-                              ) : (
-                                <span className="text-zinc-700">No per-agent breakdown</span>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      )
-                    })}
-                  </div>
-                )}
+              <div className="space-y-1">
+                <p className="text-[10px] font-mono text-zinc-600 uppercase tracking-widest px-1">Recent</p>
+                {sessionHistory.map((run, i) => (
+                  <button
+                    key={i}
+                    onClick={() => run.jobId && handleResume(run.jobId)}
+                    className="w-full text-left px-2 py-1.5 rounded hover:bg-zinc-800/40 transition-colors flex items-center gap-2"
+                  >
+                    <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded font-mono shrink-0 ${verdictBadgeClass(run.verdict)}`}>
+                      {run.verdict}
+                    </span>
+                    <span className="text-[11px] font-mono text-zinc-300 font-bold truncate">{run.ticker}</span>
+                    <span className="text-[10px] font-mono text-zinc-600 ml-auto shrink-0">{run.date}</span>
+                  </button>
+                ))}
               </div>
             )}
 
@@ -674,6 +622,7 @@ export default function Home() {
             )}
           </div>
         </aside>
+        </div>
 
         {/* CENTER MAIN ──────────────────────────────────────────── */}
         <main className={`flex-1 overflow-y-auto px-4 lg:px-6 py-4 min-w-0
@@ -1144,31 +1093,32 @@ export default function Home() {
           <div className="h-4" />
         </main>
 
-        {/* RIGHT PANEL: Live Log — desktop only ──────────────────── */}
-        <aside className="hidden lg:flex flex-col w-80 shrink-0
-          border-l border-zinc-800/60 bg-zinc-950/40 overflow-hidden">
-          <div className="px-4 py-3 border-b border-zinc-800/60 flex items-center justify-between shrink-0">
-            <span className="text-[11px] font-mono text-zinc-500 uppercase tracking-widest">
-              ⚡ Live Log
-            </span>
-            {logs.length > 0 && (
-              <span className="text-[11px] font-mono text-zinc-700">{logs.length} entries</span>
-            )}
-          </div>
-          <div className="flex-1 overflow-y-auto px-3 py-2 space-y-0.5 scrollbar-thin">
-            {logs.length === 0 ? (
-              <p className="text-[11px] font-mono text-zinc-800 italic mt-2 px-1">No logs yet.</p>
-            ) : (
-              logs.map((log, i) => (
-                <p key={i} className={`text-[11px] font-mono leading-relaxed break-all ${logClass(log)}`}>
-                  {log}
-                </p>
-              ))
-            )}
-            <div ref={logBottomRef} />
-          </div>
-        </aside>
+        {/* RIGHT PANEL: Live Log — animated toggle ─────────────── */}
+        <div className={`transition-all duration-300 ${rightOpen ? "w-[240px]" : "w-0"} overflow-hidden flex-shrink-0 border-l border-white/5`}>
+          <aside className="w-[240px] h-full flex flex-col bg-zinc-950/40">
+            <div className="px-3 py-2.5 border-b border-zinc-800/60 flex items-center gap-2 shrink-0">
+              <span className="text-[11px] font-mono text-zinc-500 uppercase tracking-widest flex-1">Live Log</span>
+              {running && <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse shrink-0" />}
+              {logs.length > 0 && (
+                <span className="text-[10px] font-mono text-zinc-700">{logs.length}</span>
+              )}
+            </div>
+            <div className="flex-1 overflow-y-auto px-2 py-1.5 space-y-0.5 scrollbar-thin">
+              {logs.length === 0 ? (
+                <p className="text-[11px] font-mono text-zinc-800 italic mt-2 px-1">No logs yet.</p>
+              ) : (
+                logs.map((log, i) => (
+                  <p key={i} className={`text-[11px] font-mono leading-relaxed break-all ${logClass(log)}`}>
+                    {log}
+                  </p>
+                ))
+              )}
+              <div ref={logBottomRef} />
+            </div>
+          </aside>
+        </div>
 
+      </div>{/* end flex row */}
       </div>{/* end three-column body */}
 
       {/* ── MOBILE: sticky bottom log bar (v1.6.0 preserved) ───── */}
@@ -1200,18 +1150,6 @@ export default function Home() {
         </>
       )}
 
-      {/* ── TABLET: log sheet (md → lg, opened by header LOG button) */}
-      {!isMobile && logSheetOpen && (
-        <div className="fixed inset-0 z-50 lg:hidden" onClick={() => setLogSheetOpen(false)}>
-          <div
-            className="absolute bottom-0 left-0 right-0 h-[60vh] bg-zinc-950/95 backdrop-blur-md
-              border-t border-zinc-800 rounded-t-xl overflow-hidden flex flex-col"
-            onClick={e => e.stopPropagation()}
-          >
-            {LogSheetContent}
-          </div>
-        </div>
-      )}
 
     </div>
   )
@@ -1225,4 +1163,30 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
       <span className="flex-1 h-px bg-zinc-800" />
     </p>
   )
+}
+
+function HamburgerButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      style={{ background: "none", border: "none", padding: "4px 6px", borderRadius: 4, cursor: "pointer" }}
+      className="hover:bg-white/[0.06] transition-colors flex-shrink-0"
+    >
+      <div style={{ width: 16, display: "flex", flexDirection: "column", gap: 3 }}>
+        {[0, 1, 2].map(i => (
+          <div key={i} style={{ height: 2, background: "#a1a1aa", borderRadius: 1 }} />
+        ))}
+      </div>
+    </button>
+  )
+}
+
+function verdictBadgeClass(v: string): string {
+  if (v === "BUY" || v === "STRONG BUY" || v === "OVERWEIGHT")
+    return "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
+  if (v === "SELL" || v === "STRONG SELL" || v === "UNDERWEIGHT")
+    return "bg-rose-500/10 text-rose-400 border border-rose-500/20"
+  if (v === "HOLD")
+    return "bg-amber-500/10 text-amber-400 border border-amber-500/20"
+  return "bg-zinc-800 text-zinc-500 border border-zinc-700"
 }

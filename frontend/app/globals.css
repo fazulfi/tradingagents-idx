@@ -6,6 +6,8 @@
 
 body {
   background-color: #09090b;
+  background-image: radial-gradient(circle, rgba(255,255,255,0.03) 1px, transparent 1px);
+  background-size: 24px 24px;
   font-family: "JetBrains Mono", monospace;
 }
 .dot-grid {
@@ -32,7 +34,7 @@ body {
   from { opacity:0; transform:translateY(10px); }
   to   { opacity:1; transform:translateY(0); }
 }
-.scrollbar-thin::-webkit-scrollbar { width:4px; }
+.scrollbar-thin::-webkit-scrollbar { width:3px; }
 .scrollbar-thin::-webkit-scrollbar-track { background:transparent; }
 .scrollbar-thin::-webkit-scrollbar-thumb { background:#3f3f46; border-radius:2px; }
 
