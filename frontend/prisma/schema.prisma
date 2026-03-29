@@ -73,3 +73,12 @@ model UserSettings {
   telegramId String?
   user       User    @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
+
+model RapidApiUsage {
+  id        String   @id @default(cuid())
+  month     String   // format: "2026-03"
+  callCount Int      @default(0)
+  updatedAt DateTime @updatedAt
+
+  @@unique([month])
+}

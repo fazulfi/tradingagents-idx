@@ -1,4 +1,4 @@
-import { NextRequest } from "next/server"
+import { NextRequest, NextResponse } from "next/server"
 import { randomUUID } from "crypto"
 import { spawn } from "child_process"
 import path from "path"
@@ -6,6 +6,8 @@ import { sanitizeTicker, sanitizeDate, detectVerdict } from "@/lib/utils"
 import { MAX_JOBS, type Sections, type TokenUsage } from "@/lib/jobStoreInterface"
 import { prisma } from "@/lib/prisma"
 import { getAuthenticatedUserId } from "@/lib/authHelpers"
+
+const JOB_TIMEOUT_MS = 10 * 60 * 1000 // 10 minutes
 
 function emptySections(): Sections {
   return {
@@ -58,6 +60,18 @@ export async function POST(req: NextRequest) {
       { error: "Too many concurrent jobs. Please wait or cancel an existing job." },
       { status: 429 }
     )
+  }
+
+  // Check RapidAPI monthly quota before spawning
+  if (process.env.IDX_RAPIDAPI_KEY) {
+    const usageRes = await fetch(`${process.env.NEXTAUTH_URL ?? 'http://localhost:3000'}/api/usage/rapidapi`)
+    const usage = await usageRes.json()
+    if (usage.limitReached) {
+      return NextResponse.json(
+        { error: `RapidAPI monthly limit reached (${usage.callCount}/1000). Resets next month.` },
+        { status: 429 }
+      )
+    }
   }
 
   const jobId = randomUUID()
@@ -284,6 +298,19 @@ print("[COMPLETE]", flush=True)
   // Update pid in Prisma (fire-and-forget)
   prisma.job.update({ where: { id: jobId }, data: { status: "running", pid: proc.pid } }).catch(() => {})
 
+  const killTimer = setTimeout(() => {
+    proc.kill('SIGTERM')
+    // Update job status to error in DB
+    prisma.job.update({
+      where: { id: jobId },
+      data: {
+        status: 'error',
+        error: 'Job timed out after 10 minutes',
+        completedAt: new Date(),
+      },
+    }).catch(() => {})
+  }, JOB_TIMEOUT_MS)
+
   const MARKERS = [
     "MARKET_ANALYST", "FUNDAMENTALS_ANALYST", "SENTIMENT_ANALYST", "NEWS_ANALYST",
     "BULL_RESEARCHER", "BEAR_RESEARCHER", "RESEARCH_DECISION", "TRADER_DECISION",
@@ -396,12 +423,22 @@ print("[COMPLETE]", flush=True)
   })
 
   proc.on("close", async (code: number) => {
+    clearTimeout(killTimer)
     await pendingWrite
     if (jobStatus === "running") {
       jobStatus = "error"
       const errMsg = code !== 0 ? `Process exited with code ${code}` : "Process ended unexpectedly"
       persistState({ error: errMsg })
       await pendingWrite
+    }
+
+    // Increment RapidAPI usage counter (5 calls per analysis)
+    if (process.env.IDX_RAPIDAPI_KEY) {
+      await fetch(`${process.env.NEXTAUTH_URL ?? 'http://localhost:3000'}/api/usage/rapidapi`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ calls: 5 }),
+      }).catch(() => {}) // non-blocking, best-effort
     }
   })
 

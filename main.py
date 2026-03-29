@@ -1,3 +1,4 @@
+import argparse
 from tradingagents.graph.trading_graph import TradingAgentsGraph
 from tradingagents.default_config import DEFAULT_CONFIG
 
@@ -6,10 +7,16 @@ from dotenv import load_dotenv
 # Load environment variables from .env file
 load_dotenv()
 
+parser = argparse.ArgumentParser()
+parser.add_argument('ticker', nargs='?', default='NVDA')
+parser.add_argument('--deep-think-llm', default=None)
+args, _ = parser.parse_known_args()
+
 # Create a custom config
 config = DEFAULT_CONFIG.copy()
-config["deep_think_llm"] = "gpt-5-mini"  # Use a different model
-config["quick_think_llm"] = "gpt-5-mini"  # Use a different model
+if args.deep_think_llm:
+    config['deep_think_llm'] = args.deep_think_llm
+
 config["max_debate_rounds"] = 1  # Increase debate rounds
 
 # Configure data vendors (default uses yfinance, no extra API keys needed)
@@ -24,7 +31,7 @@ config["data_vendors"] = {
 ta = TradingAgentsGraph(debug=True, config=config)
 
 # forward propagate
-_, decision = ta.propagate("NVDA", "2024-05-10")
+_, decision = ta.propagate(args.ticker, "2024-05-10")
 print(decision)
 
 # Memorize mistakes and reflect

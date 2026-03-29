@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.6.0] - 2026-03-29
+
+### Fixed
+- **Usage counter → Prisma DB**: Migrated RapidAPI monthly usage counter to persistent Prisma SQLite storage, eliminating cross-process limit bypass and job resets.
+- **Zombie jobs**: Added a 10-minute timeout to Python worker processes and a startup sequence cleaner (`instrumentation.ts`) that rescues frozen/running jobs across server restarts.
+- **Hardcoded model fix**: Removed forced UI model override in `main.py` allowing proper passing of CLI arguments vs configuration.
+- **Cache explosion fix**: Replaced naive cache dumping in RapidAPI caching with targeted expired key purging to reduce disk bloat and key redundancy.
+
 ## [1.5.0] - 2026-03-27
 
 ### Changed

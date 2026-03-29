@@ -35,9 +35,7 @@ class IDXRapidAPI:
         self._circuit_open_until = 0.0
         self._last_error: str | None = None
         self._cache = self._load_cache()
-        # In-memory usage counter (not persisted to disk; per-user DB tracking
-        # is done via _report_usage() instead)
-        self._usage = self._load_usage()
+        self._cache = self._load_cache()
 
         # Per-user usage reporting (set via env when running under Next.js worker)
         self._user_id: str | None = os.getenv("IDX_USER_ID") or None
@@ -55,28 +53,24 @@ class IDXRapidAPI:
             logging.warning(f"IDX cache load failed: {e}")
             return {}
 
-    def _save_cache(self):
+    def _save_cache(self) -> None:
+        """Purge expired entries then persist cache to disk."""
         try:
+            now = time.time()
+            # Remove expired keys before saving
+            expired_keys = [
+                k for k, v in self._cache.items()
+                if now - v.get("ts", 0) > self._cache_ttl
+            ]
+            for k in expired_keys:
+                del self._cache[k]
+            if expired_keys:
+                logging.debug(f"Cache: purged {len(expired_keys)} expired entries")
+
             with open(self._cache_file, "w") as f:
-                json.dump(self._cache, f)
-        except (OSError, IOError) as e:
-            logging.warning(f"IDX cache save failed: {e}")
-            self._cache_healthy = False
-
-    def _load_usage(self) -> dict:
-        """Return in-memory usage counter (no disk I/O)."""
-        return {"month": datetime.now().strftime("%Y-%m"), "count": 0}
-
-    def _save_usage(self):
-        """No-op: usage is tracked per-user in the database via _report_usage()."""
-        pass
-
-    def _check_usage(self):
-        count = self._usage.get("count", 0)
-        if count >= 1000:
-            raise IDXRateLimitError("Monthly limit reached (1000 requests)")
-        if count >= 800:
-            logging.warning(f"IDX API: {count}/1000 requests used this month")
+                json.dump(self._cache, f, indent=2)
+        except OSError as e:
+            logging.warning(f"Cache save failed: {e}")
 
     async def _report_usage(self, count: int = 1) -> None:
         """Report IDX API usage to Next.js backend for per-user tracking.
@@ -103,7 +97,7 @@ class IDXRapidAPI:
         if not self.api_key:
             return {}
 
-        cache_key = f"{endpoint}_{ticker}"
+        cache_key = endpoint
         now = time.time()
 
         # Check in-memory cache first
@@ -119,7 +113,7 @@ class IDXRapidAPI:
                 self._mem_cache[cache_key] = entry
                 return entry["data"]
 
-        self._check_usage()
+
 
         # Circuit breaker check
         if time.time() < self._circuit_open_until:
@@ -169,9 +163,7 @@ class IDXRapidAPI:
         self._cache[cache_key] = entry
         self._save_cache()
 
-        # Increment in-memory counter and report to DB (non-fatal if it fails)
-        self._usage["count"] = self._usage.get("count", 0) + 1
-        self._save_usage()  # no-op, kept for test compatibility
+        # Report to DB (non-fatal if it fails)
         await self._report_usage(1)
 
         return data
@@ -197,13 +189,12 @@ class IDXRapidAPI:
         return await self._call_async(f"/api/emiten/{clean}/foreign-ownership", ticker)
 
     def get_usage(self) -> dict:
-        used = self._usage.get("count", 0)
         now = time.time()
         return {
-            "used": used,
+            "used": "Unknown (DB tracked)",
             "limit": 1000,
-            "remaining": 1000 - used,
-            "month": self._usage.get("month", ""),
+            "remaining": "Unknown (DB tracked)",
+            "month": datetime.now().strftime("%Y-%m"),
             "circuit_status": "open" if now < self._circuit_open_until else "closed",
             "cache_status": "degraded" if not self._cache_healthy else "ok",
             "last_error": self._last_error,
